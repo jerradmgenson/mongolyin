@@ -27,7 +27,7 @@ mongolyin can currently handle the following file types:
 Files not in this list will still be ingested, but they will be treated
 as binary files and inserted using GridFS.
 
-Copyright 2021 Jerrad Michael Genson
+Copyright 2023 Jerrad Michael Genson
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -37,7 +37,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 
 import argparse
-import copy
 import json
 import logging
 import sys
@@ -46,13 +45,13 @@ from functools import partial
 from pathlib import Path
 
 import bonobo
-import gridfs
 import pandas as pd
-import pymongo
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-DEFAULT_COLLECTION_NAME = "_mongolyin_"
+from mongolyin.mongodbclient import MongoDBClient
+
+DEFAULT_COLLECTION_NAME = "misc"
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".csv", ".parquet")
 
@@ -179,6 +178,19 @@ def watch_directory(path, ingest_frequency, event_handler):
 
 
 def create_dispatch(mongo_client, ingress_path):
+    """
+    Creates a dispatch function which is capable of processing filepaths and
+    handling them according to their file types.
+
+    Args:
+        mongo_client (MongoDBClient): An instance of MongoDBClient to perform database operations.
+        ingress_path (str): The base directory which files are being ingested from.
+
+    Returns:
+        dispatch (func): A function capable of processing and uploading file data to MongoDB.
+
+    """
+
     def extract_pandas(filepath):
         if filepath.suffix == ".csv":
             df = pd.read_csv(filepath)
@@ -203,19 +215,6 @@ def create_dispatch(mongo_client, ingress_path):
             return fp.read()
 
     def dispatch(filepath):
-        """
-        Creates a dispatch function which is capable of processing filepaths and
-        handling them according to their file types.
-
-        Args:
-            mongo_client (MongoDBClient): An instance of MongoDBClient to perform database operations.
-            ingress_path (str): The base directory which files are being ingested from.
-
-        Returns:
-            dispatch (func): A function capable of processing and uploading file data to MongoDB.
-
-        """
-
         def get_filepaths():
             yield filepath
 
@@ -230,14 +229,16 @@ def create_dispatch(mongo_client, ingress_path):
         tmp_client = tmp_client.with_collection(collection_name)
         graph = bonobo.Graph()
         if filepath.suffix in PANDAS_EXTENSIONS:
-            graph.add_chain(get_filepaths, extract_pandas, tmp_client.insert_documents)
+            load = partial(tmp_client.insert_documents, filename=filepath.name)
+            graph.add_chain(get_filepaths, extract_pandas, load)
 
         elif filepath.suffix == ".json":
-            graph.add_chain(get_filepaths, extract_json, tmp_client.insert_document)
+            load = partial(tmp_client.insert_document, filename=filepath.name)
+            graph.add_chain(get_filepaths, extract_json, load)
 
         else:
-            insert_file = partial(tmp_client.insert_file, filename=filepath.name)
-            graph.add_chain(get_filepaths, extract_bin, insert_file)
+            load = partial(tmp_client.insert_file, filename=filepath.name)
+            graph.add_chain(get_filepaths, extract_bin, load)
 
         bonobo.run(graph)
 
@@ -335,173 +336,6 @@ class FileChangeHandler(FileSystemEventHandler):
             logger = logging.getLogger(__name__)
             logger.info("File added: %s", event.src_path)
             self._dispatch(event.src_path)
-
-
-class MongoDBClient:
-    """
-    A MongoDB client class which abstracts away the connection, insertion and other operations
-    related to MongoDB. It provides the capability to handle single documents, multiple documents,
-    and binary file insertion to the MongoDB database.
-
-    Args:
-        address (str): The IP address or URL of the MongoDB server.
-        username (str): The username used to authenticate with the MongoDB server.
-        password (str): The password used to authenticate with the MongoDB server.
-        auth_db (str): The name of the MongoDB authentication database to use.
-        db (str): The name of the database to write file data to.
-        collection (str): The name of the collection to write file data to.
-        client (MongoClient, optional): An existing MongoDB client object.
-
-    """
-
-    def __init__(self, address, username, password, auth_db, db, collection, client=None):
-        self._address = address
-        self._username = username
-        self._password = password
-        self._auth_db = auth_db
-        self._db_name = db
-        self._collection_name = collection
-        self._client = client
-
-    @property
-    def client(self):
-        if self._client is None:
-            self._client = pymongo.MongoClient(
-                self._address,
-                username=self._username,
-                password=self._password,
-                authSource=self._auth_db,
-            )
-        return self._client
-
-    @property
-    def db(self):
-        return self.client[self._db_name]
-
-    @property
-    def collection(self):
-        return self.db[self._collection_name]
-
-    @property
-    def fs(self):
-        return gridfs.GridFS(self.db)
-
-    def insert_document(self, document, retry=1):
-        """
-        Insert a single document into the MongoDB collection.
-
-        Args:
-            document (dict): The document to be inserted.
-            retry (int, optional): Number of times to retry in case of failure.
-
-        """
-
-        logger = logging.getLogger(__name__)
-        if retry < 0:
-            logger.error("Exceeded maximum number of retries. Failed to insert file.")
-
-        try:
-            self.collection.insert_one(document)
-
-        except pymongo.errors.AutoReconnect as ar:
-            logger.exception(ar)
-            self._client = None
-            self.insert_document(document, retry=retry - 1)
-
-        except pymongo.errors.OperationFailure as of:
-            logger.exception(of)
-            self.insert_document(document, retry=retry - 1)
-
-    def insert_documents(self, documents, retry=1):
-        """
-        Insert multiple documents into the MongoDB collection.
-
-        Args:
-            documents (list): A list of documents to be inserted.
-            retry (int, optional): Number of times to retry in case of failure.
-
-        """
-
-        logger = logging.getLogger(__name__)
-        if retry < 0:
-            logger.error("Exceeded maximum number of retries. Failed to insert file.")
-
-        try:
-            self.collection.insert_many(documents)
-
-        except pymongo.errors.AutoReconnect as ar:
-            logger.exception(ar)
-            self._client = None
-            self.insert_documents(documents, retry=retry - 1)
-
-        except pymongo.errors.OperationFailure as of:
-            logger.exception(of)
-            self.insert_documents(documents, retry=retry - 1)
-
-    def insert_file(self, data, filename, retry=1):
-        """
-        Insert a binary file into the MongoDB GridFS.
-
-        Args:
-            data (bytes): Binary data of the file to be inserted.
-            filename (str): The filename associated with the data.
-            retry (int, optional): Number of times to retry in case of failure.
-
-        """
-
-        logger = logging.getLogger(__name__)
-        if retry < 0:
-            logger.error("Exceeded maximum number of retries. Failed to insert file.")
-
-        try:
-            self.fs.put(data, filename=filename)
-
-        except pymongo.errors.AutoReconnect as ar:
-            logger.exception(ar)
-            self._client = None
-            self.insert_file(data, filename, retry=retry - 1)
-
-        except pymongo.errors.OperationFailure as of:
-            logger.exception(of)
-            self.insert_file(data, filename, retry=retry - 1)
-
-    def with_db(self, db_name):
-        """
-        Return a new instance of MongoDBClient with the specified database name.
-
-        Args:
-            db_name (str): The name of the database to be used.
-
-        Returns:
-            MongoDBClient: A new instance of MongoDBClient with the specified database name.
-
-        """
-
-        if not self._db_name:
-            new_client = copy.copy(self)
-            new_client._db_name = db_name
-            return new_client
-
-        return self
-
-    def with_collection(self, collection_name):
-        """
-        Return a new instance of MongoDBClient with the specified collection name.
-
-        Args:
-            collection_name (str): The name of the collection to be used.
-
-        Returns:
-            MongoDBClient: A new instance of MongoDBClient with the specified collection name.
-
-        """
-
-        if not self._collection_name:
-            new_client = copy.copy(self)
-            new_client._collection_name = collection_name
-            return new_client
-
-        return self
 
 
 if __name__ == "__main__":
