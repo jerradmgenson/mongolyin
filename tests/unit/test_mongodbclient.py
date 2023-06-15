@@ -31,10 +31,56 @@ class TestMongoDBClient(unittest.TestCase):
             collection="test_collection",
         )
 
-        self.client._client = MagicMock()
+        self.mock_client = MagicMock()
+        self.client._client = self.mock_client
 
     def tearDown(self):
         self.patcher.stop()
+
+    def test_context_manager(self):
+        mock_client = MagicMock()
+        client_args = (
+            "test_address",
+            "test_user",
+            "test_pass",
+            "test_auth_db",
+            "test_db",
+            "test_collection",
+        )
+
+        with MongoDBClient(*client_args, client=mock_client) as mongo_client:
+            self.assertIsInstance(mongo_client, MongoDBClient)
+
+        mock_client.close.assert_called_once()
+
+    @patch("pymongo.MongoClient")
+    def test_connect_closes_existing_client(self, mock_mongo_client):
+        self.patcher.stop()
+        client_args = (
+            "test_address",
+            "test_user",
+            "test_pass",
+            "test_auth_db",
+            "test_db",
+            "test_collection",
+        )
+
+        mock_client = MagicMock()
+        mock_mongo_client.return_value = mock_client
+        mongo_client = MongoDBClient(*client_args)
+        mongo_client._connect()
+        self.assertEqual(mock_mongo_client.call_count, 2)
+        mock_client.close.assert_called_once()
+
+    @patch("logging.getLogger")
+    def test_log_exception_on_close_error(self, mock_getLogger):
+        mock_logger = MagicMock()
+        mock_getLogger.return_value = mock_logger
+        mock_close = MagicMock(side_effect=pymongo.errors.AutoReconnect())
+        self.mock_client.close = mock_close
+        self.client.close()
+        mock_close.assert_called_once()
+        mock_logger.exception.assert_called_once()
 
     @patch.object(MongoDBClient, "collection")
     def test_insert_document_no_existing(self, mock_collection):

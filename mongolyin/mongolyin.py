@@ -71,7 +71,7 @@ def main(argv):
 
     clargs = parse_command_line(argv)
     configure_logging(clargs.loglevel)
-    mongo_client = MongoDBClient(
+    mongodb_client_args = (
         clargs.address,
         clargs.username,
         clargs.password,
@@ -79,9 +79,11 @@ def main(argv):
         clargs.db,
         clargs.collection,
     )
-    dispatch = create_dispatch(mongo_client, clargs.ingress_path)
-    event_handler = FileChangeHandler(dispatch)
-    watch_directory(clargs.ingress_path, clargs.ingest_frequency, event_handler)
+
+    with MongoDBClient(*mongodb_client_args) as mongo_client:
+        dispatch = create_dispatch(mongo_client, clargs.ingress_path)
+        event_handler = FileChangeHandler(dispatch)
+        watch_directory(clargs.ingress_path, clargs.ingest_frequency, event_handler)
 
     return 0
 

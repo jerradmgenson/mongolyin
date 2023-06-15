@@ -106,13 +106,40 @@ class MongoDBClient:
         if self._client is None:
             self._connect()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self.close()
+        if exc_type is not None:
+            return False
+
+        return True
+
     def _connect(self):
+        if self._client:
+            self.close()
+
         self._client = pymongo.MongoClient(
             self._address,
             username=self._username,
             password=self._password,
             authSource=self._auth_db,
         )
+
+    def close(self):
+        """
+        Close the connection to the database. If errors occur, log them
+        and continue execution.
+
+        """
+
+        try:
+            self._client.close()
+
+        except (pymongo.errors.ConnectionFailure, pymongo.errors.AutoReconnect) as e:
+            logger = logging.getLogger(__name__)
+            logger.exception(e)
 
     @property
     def db(self):
