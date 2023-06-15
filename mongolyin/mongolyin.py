@@ -66,16 +66,32 @@ def main(argv):
 
     Returns:
         0, a standard exit status, which means the program exited without errors.
+        1, indicates that one or more arguments are missing.
 
     """
 
     clargs = parse_command_line(argv)
     configure_logging(clargs.loglevel)
+    username = clargs.username if clargs.username else os.environ.get("MONGODB_USERNAME")
+    if not username:
+        print("You must supply --username or define `MONGODB_USERNAME` in the environment.")
+        return 1
+
+    password = clargs.password if clargs.password else os.environ.get("MONGODB_PASSWORD")
+    if not password:
+        print("You must supply --password or define `MONGODB_PASSWORD` in the environment.")
+        return 1
+
+    auth_db = clargs.auth_db if clargs.auth_db else os.environ.get("MONGO_AUTH_DB")
+    if not auth_db:
+        print("You must supply --auth-db or define `MONGODB_AUTH_DB` in the environment.")
+        return 1
+
     mongodb_client_args = (
         clargs.address,
-        clargs.username,
-        clargs.password,
-        clargs.auth_db,
+        username,
+        password,
+        auth_db,
         clargs.db,
         clargs.collection,
     )
@@ -106,9 +122,13 @@ def parse_command_line(argv):
     )
 
     parser.add_argument("ingress_path", type=Path, help="Path to the ingress directory.")
-    parser.add_argument("address", help="IP address or URL of the MongoDB server.")
-    parser.add_argument("username", help="Username to use to authenticate with the MongoDB server.")
-    parser.add_argument("password", help="Password to use to authenticate with the MongoDB server.")
+    parser.add_argument("--address", help="IP address or URL of the MongoDB server.")
+    parser.add_argument(
+        "--username", help="Username to use to authenticate with the MongoDB server."
+    )
+    parser.add_argument(
+        "--password", help="Password to use to authenticate with the MongoDB server."
+    )
     parser.add_argument(
         "--auth-db", default="admin", help="Name of the MongoDB authentication database to use."
     )
