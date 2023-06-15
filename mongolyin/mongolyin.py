@@ -39,6 +39,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from functools import partial
@@ -177,72 +178,165 @@ def watch_directory(path, ingest_frequency, event_handler):
     observer.join()
 
 
-def create_dispatch(mongo_client, ingress_path):
+def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_graph=bonobo.run):
     """
-    Creates a dispatch function which is capable of processing filepaths and
-    handling them according to their file types.
+    Creates a dispatch function which handles the ingestion of different
+    file types.
 
     Args:
-        mongo_client (MongoDBClient): An instance of MongoDBClient to perform database operations.
-        ingress_path (str): The base directory which files are being ingested from.
+        mongo_client (MongoDBClient): An instance of MongoDBClient to
+                                      perform database operations.
+        ingress_path (str): The base directory which files are being
+                            ingested from.
+        create_graph (func, optional): A function to create a new bonobo
+                                       graph. Defaults to bonobo.Graph.
+        run_graph (func, optional): A function to execute a bonobo graph.
+                                    Defaults to bonobo.run.
 
     Returns:
-        dispatch (func): A function capable of processing and uploading file data to MongoDB.
-
+        dispatch (func): A function capable of processing and uploading
+                         file data to MongoDB.
     """
-
-    def extract_pandas(filepath):
-        if filepath.suffix == ".csv":
-            df = pd.read_csv(filepath)
-
-        elif filepath.suffix == ".parquet":
-            df = pd.read_parquet(filepath)
-
-        elif filepath.suffix in SPREADSHEET_EXTENSIONS:
-            df = pd.read_excel(filepath)
-
-        else:
-            raise ValueError(f"This extractor can not read '{filepath.suffix} files.'")
-
-        return df.to_dict(orient="records")
-
-    def extract_json(filepath):
-        with filepath.open() as fp:
-            return json.load(fp)
-
-    def extract_bin(filepath):
-        with filepath.open("rb") as fp:
-            return fp.read()
 
     def dispatch(filepath):
         def get_filepaths():
             yield filepath
 
-        logger = logging.getLogger(__name__)
-        db_name = get_db_name(ingress_path, filepath)
-        if not db_name:
-            logger.debug(f"Not uploading {filepath} because it isn't in a database directory.")
+        new_client = update_mongodb_client(mongo_client, ingress_path, filepath)
+        if new_client is None:
             return
 
-        tmp_client = mongo_client.with_db(db_name)
-        collection_name = get_collection_name(ingress_path, filepath)
-        tmp_client = tmp_client.with_collection(collection_name)
-        graph = bonobo.Graph()
-        if filepath.suffix in PANDAS_EXTENSIONS:
-            load = partial(tmp_client.insert_documents, filename=filepath.name)
-            graph.add_chain(get_filepaths, extract_pandas, load)
-
-        elif filepath.suffix == ".json":
-            load = partial(tmp_client.insert_document, filename=filepath.name)
-            graph.add_chain(get_filepaths, extract_json, load)
-
-        else:
-            load = partial(tmp_client.insert_file, filename=filepath.name)
-            graph.add_chain(get_filepaths, extract_bin, load)
-
-        bonobo.run(graph)
+        extract, load = select_etl_functions(filepath, new_client)
+        graph = create_graph()
+        graph.add_chain(get_filepaths, file_ready_check, extract, load)
+        run_graph(graph)
 
     return dispatch
+
+
+def select_etl_functions(filepath, mongo_client):
+    """
+    Selects appropriate extraction and loading functions based on the
+    file type.
+
+    Args:
+        filepath (Path): Path to the file.
+        mongo_client (MongoDBClient): An instance of MongoDBClient to
+                                      perform database operations.
+
+    Returns:
+        extract (func), load (func): The extraction and load functions
+                                     selected for this file type.
+    """
+
+    if filepath.suffix in PANDAS_EXTENSIONS:
+        extract = extract_pandas
+        load = partial(mongo_client.insert_documents, filename=filepath.name)
+
+    elif filepath.suffix == ".json":
+        extract = extract_json
+        load = partial(mongo_client.insert_document, filename=filepath.name)
+
+    else:
+        extract = extract_bin
+        load = partial(mongo_client.insert_file, filename=filepath.name)
+
+    return extract, load
+
+
+def update_mongodb_client(mongo_client, ingress_path, filepath):
+    """
+    Updates the database and collection on the MongoDB client based on
+    the file path.
+
+    Args:
+        mongo_client (MongoDBClient): An instance of MongoDBClient to
+                                      perform database operations.
+        ingress_path (str): The base directory which files are being
+                            ingested from.
+        filepath (Path): Path to the file.
+
+    Returns:
+        MongoDBClient: A new MongoDB client with the new database
+                       and collection.
+
+    """
+
+    logger = logging.getLogger(__name__)
+    db_name = get_db_name(ingress_path, filepath)
+    if not db_name:
+        logger.debug("Not uploading %s because it isn't in a database directory.", filepath)
+        return None
+
+    mongo_client = mongo_client.with_db(db_name)
+    collection_name = get_collection_name(ingress_path, filepath)
+    mongo_client = mongo_client.with_collection(collection_name)
+
+    return mongo_client
+
+
+def extract_pandas(filepath):
+    """
+    Extracts data from a pandas-compatible file into a list of
+    dictionary records.
+
+    Args:
+        filepath (Path): Path to the file.
+
+    Returns:
+        List[Dict]: A list of dictionaries representing the data in the
+                    file.
+
+    Raises:
+        ValueError: If the file type is not compatible with pandas.
+
+    """
+
+    if filepath.suffix == ".csv":
+        df = pd.read_csv(filepath)
+
+    elif filepath.suffix == ".parquet":
+        df = pd.read_parquet(filepath)
+
+    elif filepath.suffix in SPREADSHEET_EXTENSIONS:
+        df = pd.read_excel(filepath)
+
+    else:
+        raise ValueError(f"This extractor can not read '{filepath.suffix} files.'")
+
+    return df.to_dict(orient="records")
+
+
+def extract_json(filepath):
+    """
+    Extracts data from a JSON file into a Python data structure.
+
+    Args:
+        filepath (Path): Path to the file.
+
+    Returns:
+        Any: The Python data structure obtained from the JSON file.
+
+    """
+
+    with filepath.open() as fp:
+        return json.load(fp)
+
+
+def extract_bin(filepath):
+    """
+    Extracts data from a binary file.
+
+    Args:
+        filepath (Path): Path to the file.
+
+    Returns:
+        bytes: The data read from the binary file.
+
+    """
+
+    with filepath.open("rb") as fp:
+        return fp.read()
 
 
 def get_db_name(ingress_path, filepath):
@@ -262,8 +356,11 @@ def get_db_name(ingress_path, filepath):
     """
 
     partial_path = sub_path(ingress_path, filepath)
-    if len(partial_path) >= 1:
+    # There should be at least one directory and a file in partial_path.
+    if len(partial_path) >= 2:
         return partial_path[0]
+
+    return None
 
 
 def get_collection_name(ingress_path, filepath):
@@ -284,7 +381,8 @@ def get_collection_name(ingress_path, filepath):
     """
 
     partial_path = sub_path(ingress_path, filepath)
-    if len(partial_path) >= 2:
+    # There should be at least two directories and a file in partial_path.
+    if len(partial_path) >= 3:
         return partial_path[1]
 
     return DEFAULT_COLLECTION_NAME
@@ -302,6 +400,9 @@ def sub_path(ingress_path, filepath):
         list: A list of path parts starting from the first directory inside the
               ingress directory to the file.
 
+    Raises:
+      ValueError: when filepath is not within ingress_path.
+
     """
 
     ingress_dir = ingress_path.name
@@ -309,9 +410,41 @@ def sub_path(ingress_path, filepath):
     for part in filepath.parts:
         filepath_parts.pop(0)
         if part == ingress_dir:
-            break
+            return filepath_parts
 
-    return filepath_parts
+    raise ValueError(f"filepath '{filepath}' not within ingress path '{ingress_path}'")
+
+
+def file_ready_check(filepath, interval=0.1, timeout=5):
+    """
+    Block until the file is no longer being written to.
+
+    Args:
+      filepath: Path to the file to check.
+      interval: Interval to wait between checking file size.
+      timeout: Total time to block before raising TimeoutError.
+
+    Returns:
+      `filepath` when writing is finished.
+
+    Raises:
+      TimeoutError
+
+    """
+
+    tick = time.time()
+    while time.time() - tick < timeout:
+        try:
+            size_before = os.path.getsize(filepath)
+            time.sleep(interval)
+            size_after = os.path.getsize(filepath)
+            if size_before == size_after:
+                return filepath
+
+        except OSError:
+            pass
+
+    raise TimeoutError(f"Timed out while waiting to read '{filepath}'")
 
 
 class FileChangeHandler(FileSystemEventHandler):

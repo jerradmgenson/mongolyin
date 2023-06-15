@@ -1,5 +1,5 @@
 """
-Unit tests for mongodbclient.MongoDBClient
+Unit tests for mongolyin.mongodbclient
 
 Copyright 2023 Jerrad Michael Genson
 
