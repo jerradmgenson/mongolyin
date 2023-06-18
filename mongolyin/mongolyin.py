@@ -72,6 +72,8 @@ def main(argv):
 
     clargs = parse_command_line(argv)
     configure_logging(clargs.loglevel)
+    logger = logging.getLogger(__name__)
+    logger.debug("mongolyin started")
     username = clargs.username if clargs.username else os.environ.get("MONGODB_USERNAME")
     if not username:
         print("You must supply --username or define `MONGODB_USERNAME` in the environment.")
@@ -189,7 +191,8 @@ def watch_directory(path, ingest_frequency, event_handler):
     observer = Observer()
     observer.schedule(event_handler, path, recursive=True)
     observer.start()
-
+    logger = logging.getLogger(__name__)
+    logger.debug("mongolyin ready")
     try:
         while True:
             time.sleep(ingest_frequency)
@@ -437,7 +440,7 @@ def sub_path(ingress_path, filepath):
     raise ValueError(f"filepath '{filepath}' not within ingress path '{ingress_path}'")
 
 
-def file_ready_check(filepath, interval=0.1, timeout=5):
+def file_ready_check(filepath, interval=0.2, timeout=5):
     """
     Block until the file is no longer being written to.
 
@@ -484,13 +487,13 @@ class FileChangeHandler(FileSystemEventHandler):
         if not event.is_directory:
             logger = logging.getLogger(__name__)
             logger.info("File modified: %s", event.src_path)
-            self._dispatch(event.src_path)
+            self._dispatch(Path(event.src_path))
 
     def on_created(self, event):
         if not event.is_directory:
             logger = logging.getLogger(__name__)
             logger.info("File added: %s", event.src_path)
-            self._dispatch(event.src_path)
+            self._dispatch(Path(event.src_path))
 
 
 if __name__ == "__main__":
