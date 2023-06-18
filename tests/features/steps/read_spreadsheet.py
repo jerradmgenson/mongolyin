@@ -1,5 +1,5 @@
 """
-Behave steps for read_csv feature.
+Behave steps for read_spreadsheet feature.
 
 Copyright 2023 Jerrad Michael Genson
 
@@ -17,7 +17,7 @@ import pymongo
 from behave import *
 
 
-@then("it should upload the csv data into MongoDB")
+@then("it should upload the spreadsheet data into MongoDB")
 def step_impl(context):
     kwargs = dict(
         host=context.mongo_address,
@@ -32,6 +32,11 @@ def step_impl(context):
             root = Path(root)
             for file_ in files:
                 filepath = root / file_
-                df = pd.read_csv(filepath)
+                if filepath.suffix == ".csv":
+                    df = pd.read_csv(filepath)
+
+                else:
+                    df = pd.read_excel(filepath)
+
                 for record in df.to_dict(orient="records"):
                     assert len(list(collection.find(record))) == 1
