@@ -1,0 +1,13 @@
+{
+  "id": 4,
+  "name": "Emily Brown",
+  "age": 28,
+  "email": "emilybrown@example.com",
+  "address": {
+    "street": "321 Pine Road",
+    "city": "San Francisco",
+    "state": "CA",
+    "zip": "94101"
+  },
+  "active": true
+}

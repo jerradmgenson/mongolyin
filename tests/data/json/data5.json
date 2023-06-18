@@ -1,0 +1,13 @@
+{
+  "id": 5,
+  "name": "Michael Johnson",
+  "age": 35,
+  "email": "michaeljohnson@example.com",
+  "address": {
+    "street": "555 Maple Lane",
+    "city": "Seattle",
+    "state": "WA",
+    "zip": "98101"
+  },
+  "active": true
+}

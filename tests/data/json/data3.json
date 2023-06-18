@@ -1,0 +1,13 @@
+{
+  "id": 3,
+  "name": "Alex Johnson",
+  "age": 40,
+  "email": "alexjohnson@example.com",
+  "address": {
+    "street": "789 Oak Avenue",
+    "city": "Chicago",
+    "state": "IL",
+    "zip": "60601"
+  },
+  "active": false
+}
