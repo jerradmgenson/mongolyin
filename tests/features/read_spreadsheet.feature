@@ -20,3 +20,10 @@
               tests/data/xlsx --address {address} --username {username} --password {password} --loglevel debug
               """
               Then it should upload the spreadsheet data into MongoDB
+
+            Scenario: Read xls files from a collection directory
+              When we run mongolyin.py with the correct arguments
+              """
+              tests/data/xls --address {address} --username {username} --password {password} --loglevel debug
+              """
+              Then it should upload the spreadsheet data into MongoDB
