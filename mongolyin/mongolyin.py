@@ -440,7 +440,7 @@ def sub_path(ingress_path, filepath):
     raise ValueError(f"filepath '{filepath}' not within ingress path '{ingress_path}'")
 
 
-def file_ready_check(filepath, interval=0.2, timeout=5):
+def file_ready_check(filepath, interval=0.1, timeout=5):
     """
     Block until the file is no longer being written to.
 

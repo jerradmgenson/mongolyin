@@ -19,7 +19,7 @@ import pymongo
 from pymongo.errors import ServerSelectionTimeoutError
 
 
-def before_all(context):
+def before_scenario(context, scenario):
     client = docker.from_env()
     try:
         client.images.get("mongo_testdb")
@@ -46,7 +46,7 @@ def before_all(context):
     wait_for_mongo(context.mongo_address)
 
 
-def after_all(context):
+def after_scenario(context, scenario):
     context.container.stop()
 
 
