@@ -13,7 +13,7 @@ import os
 import time
 
 
-def wait_for_ready(logstream, timeout=30):
+def wait_for_ready(logstream, timeout=10):
     """
     Block until mongolyin process to be ready to monitor directory changes.
 
@@ -43,7 +43,7 @@ def wait_for_ready(logstream, timeout=30):
     raise TimeoutError("Timed out waiting for mongolyin to be ready.\n\n" + logs)
 
 
-def wait_for_upload(logstream, filenames, timeout=60):
+def wait_for_upload(logstream, filenames, timeout=10):
     """
     Block until mongolyin process has uploaded all expected files.
 

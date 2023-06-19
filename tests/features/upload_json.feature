@@ -1,6 +1,6 @@
-          Feature: Read json files into MongoDB
+          Feature: Upload json data to MongoDB
 
-            Scenario: Read json files from a collection directory
+            Scenario: Upload new json files from a collection directory
               When we run mongolyin.py with the correct arguments
               """
               tests/data/json --address {address} --username {username} --password {password} --loglevel debug

@@ -45,6 +45,11 @@ import time
 from functools import partial
 from pathlib import Path
 
+# Setup deprecated alias to fix broken bonobo imports.
+import collections
+import collections.abc
+collections.Iterable = collections.abc.Iterable
+
 import bonobo
 import pandas as pd
 from watchdog.events import FileSystemEventHandler
