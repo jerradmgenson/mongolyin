@@ -42,6 +42,8 @@ import logging
 import os
 import sys
 import time
+from collections import defaultdict
+from queue import Queue, Empty
 from functools import partial
 from pathlib import Path
 
@@ -57,7 +59,11 @@ from watchdog.observers import Observer
 
 from mongolyin.mongodbclient import MongoDBClient
 
+CLEANUP_FREQUENCY = 30  # 30 seconds
+CLEANUP_SIZE = 10485760  # 10 MB
+DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_COLLECTION_NAME = "misc"
+INGEST_FREQUENCY = 0.05
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".csv", ".parquet")
 
@@ -81,21 +87,25 @@ def main(argv):
     logger.debug("mongolyin started")
     username = clargs.username if clargs.username else os.environ.get("MONGODB_USERNAME")
     if not username:
-        print("You must supply --username or define `MONGODB_USERNAME` in the environment.")
+        print("You must supply --username or define `MONGODB_USERNAME` in the environment.", file=sys.stderr)
         return 1
 
     password = clargs.password if clargs.password else os.environ.get("MONGODB_PASSWORD")
     if not password:
-        print("You must supply --password or define `MONGODB_PASSWORD` in the environment.")
+        print("You must supply --password or define `MONGODB_PASSWORD` in the environment.", file=sys.stderr)
         return 1
 
-    auth_db = clargs.auth_db if clargs.auth_db else os.environ.get("MONGO_AUTH_DB")
-    if not auth_db:
-        print("You must supply --auth-db or define `MONGODB_AUTH_DB` in the environment.")
-        return 1
+    auth_db = clargs.auth_db if clargs.auth_db else os.environ.get("MONGO_AUTH_DB", "admin")
+    logger.info("Authentication database: %s", auth_db)
+    if clargs.address:
+        address = clargs.address
 
+    else:
+        address = os.environ.get("MONGODB_ADDRESS", DEFAULT_ADDRESS)
+
+    logger.info("Server address: %s", address)
     mongodb_client_args = (
-        clargs.address,
+        address,
         username,
         password,
         auth_db,
@@ -104,9 +114,9 @@ def main(argv):
     )
 
     with MongoDBClient(*mongodb_client_args) as mongo_client:
-        dispatch = create_dispatch(mongo_client, clargs.ingress_path)
+        dispatch, process = create_dispatch(mongo_client, clargs.ingress_path)
         event_handler = FileChangeHandler(dispatch)
-        watch_directory(clargs.ingress_path, clargs.ingest_frequency, event_handler)
+        watch_directory(clargs.ingress_path, INGEST_FREQUENCY, event_handler, process)
 
     return 0
 
@@ -137,7 +147,7 @@ def parse_command_line(argv):
         "--password", help="Password to use to authenticate with the MongoDB server."
     )
     parser.add_argument(
-        "--auth-db", default="admin", help="Name of the MongoDB authentication database to use."
+        "--auth-db", help="Name of the MongoDB authentication database to use."
     )
     parser.add_argument(
         "--db",
@@ -146,13 +156,6 @@ def parse_command_line(argv):
     parser.add_argument(
         "--collection",
         help="Name of the collection to write file data. If this isn't given, subdirectory names are used instead.",
-    )
-    parser.add_argument(
-        "--frequency",
-        dest="ingest_frequency",
-        default=60,
-        type=float,
-        help="How often to scan the ingest directory, in seconds.",
     )
     parser.add_argument(
         "--loglevel",
@@ -182,7 +185,7 @@ def configure_logging(loglevel):
     root_logger.addHandler(stream_handler)
 
 
-def watch_directory(path, ingest_frequency, event_handler):
+def watch_directory(path, ingest_frequency, event_handler, process):
     """
     Monitors the directory for changes and triggers event handler when changes occur.
 
@@ -190,25 +193,29 @@ def watch_directory(path, ingest_frequency, event_handler):
         path: The path to the directory to monitor.
         ingest_frequency: The frequency at which to check for changes, in seconds.
         event_handler: The event handler to use with the Observer instance.
+        process: Function to call to process dispatch arguments.
 
     """
 
     observer = Observer()
     observer.schedule(event_handler, path, recursive=True)
-    observer.start()
     logger = logging.getLogger(__name__)
-    logger.debug("mongolyin ready")
     try:
+        observer.start()
+        logger.debug("mongolyin ready")
         while True:
+            process()
             time.sleep(ingest_frequency)
 
     except KeyboardInterrupt:
+        pass
+
+    finally:
         observer.stop()
+        observer.join()
 
-    observer.join()
 
-
-def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_graph=bonobo.run):
+def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_graph=bonobo.run, debounce_time=2):
     """
     Creates a dispatch function which handles the ingestion of different
     file types.
@@ -222,26 +229,59 @@ def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_g
                                        graph. Defaults to bonobo.Graph.
         run_graph (func, optional): A function to execute a bonobo graph.
                                     Defaults to bonobo.run.
+        debounce_time (float, optional): Number of seconds that must pass before
+                                         processing the same file again.
 
     Returns:
         dispatch (func): A function capable of processing and uploading
                          file data to MongoDB.
+        process (func): A function that is called to process arguments
+                        given to `dispatch`.
+
     """
 
-    def dispatch(filepath):
-        def get_filepaths():
-            yield filepath
+    queue = Queue()
+    file_record = defaultdict(int)
+    last_cleanup = time.time()
+    logger = logging.getLogger(__name__)
 
-        new_client = update_mongodb_client(mongo_client, ingress_path, filepath)
-        if new_client is None:
-            return
+    def process():
+        nonlocal last_cleanup
 
-        extract, load = select_etl_functions(filepath, new_client)
-        graph = create_graph()
-        graph.add_chain(get_filepaths, file_ready_check, extract, load)
-        run_graph(graph)
+        current_time = time.time()
+        try:
+            filepath = queue.get_nowait()
+            if current_time - file_record[filepath] < debounce_time:
+                logging.debug("Already processed %s within last %d seconds, skipping", filepath, debounce_time)
+                return
 
-    return dispatch
+            def get_filepaths():
+                yield filepath
+
+            new_client = update_mongodb_client(mongo_client, ingress_path, filepath)
+            if new_client is None:
+                return
+
+            extract, load = select_etl_functions(filepath, new_client)
+            graph = create_graph()
+            graph.add_chain(get_filepaths, file_ready_check, extract, load)
+            run_graph(graph)
+            file_record[filepath] = current_time
+            if (current_time - last_cleanup > CLEANUP_FREQUENCY or sys.getsizeof(file_record) > CLEANUP_SIZE):
+                to_delete = []
+                for key, timestamp in file_record.items():
+                    if timestamp - current_time > debounce_time:
+                        to_delete.append(key)
+
+                for key in to_delete:
+                    del file_record[key]
+
+                last_cleanup = current_time
+
+        except Empty:
+            pass
+
+    return queue.put, process
 
 
 def select_etl_functions(filepath, mongo_client):

@@ -262,12 +262,10 @@ class MongoDBClient:
 
         logger = logging.getLogger(__name__)
         data_hash = sha256(data).hexdigest()
-        files = self.fs.find({"filename": filename})
-        for file_ in files:
-            with ExceptionLogger((KeyError, TypeError)):
-                if file_["metadata"]["hash"] == data_hash:
-                    logger.info("'%s' already exists in database, skipping", filename)
-                    return None
+        files = list(self.fs.find({"filename": filename, "metadata.hash": data_hash}))
+        if len(files) != 0:
+            logger.info("'%s' already exists in database, skipping", filename)
+            return None
 
         metadata = {
             "date": datetime.datetime.now(datetime.timezone.utc),

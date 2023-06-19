@@ -13,6 +13,7 @@ import os
 import re
 import tempfile
 import time
+import shutil
 import subprocess
 import pandas as pd
 from pathlib import Path
@@ -28,8 +29,6 @@ import utils
 def step_impl(context):
     context.inputdir = Path(context.text.strip())
     assert context.inputdir.exists()
-    context.mongo_dbname = context.inputdir.parts[1]
-    context.mongo_collection = context.inputdir.parts[2]
 
 
 @when("we run mongolyin.py on the directory with preexisting files")
@@ -42,8 +41,14 @@ def step_impl(context):
 
     args = list(re.split(r"\s+", text))
     with tempfile.TemporaryDirectory() as tmpdirname:
+        args[0] = tmpdirname
         args = ["python", "-m", "mongolyin.mongolyin"] + args
         with tempfile.TemporaryFile("w+") as stderr:
+            context.mongo_dbname = "db"
+            context.mongo_collection = "collection"
+            collection_dir = Path(tmpdirname) / context.mongo_dbname / context.mongo_collection
+            collection_dir.mkdir(parents=True)
+            shutil.copytree(context.inputdir, collection_dir, dirs_exist_ok=True)
             try:
                 process = subprocess.Popen(args, stderr=stderr)
                 utils.wait_for_ready(stderr)
@@ -67,5 +72,5 @@ def step_impl(context):
         for root, _, files in os.walk(context.inputdir):
             root = Path(root)
             for file_ in files:
-                results = list(collection.find({"metadata": {"filename": file_}}))
+                results = list(collection.find({"metadata.filename": file_}))
                 assert len(results) == 0

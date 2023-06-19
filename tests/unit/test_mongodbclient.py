@@ -293,7 +293,7 @@ class TestMongoDBClient(unittest.TestCase):
         self.client.insert_file(b"test_data", "test_filename")
 
         # Check that find was called with correct arguments
-        mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename"})
+        mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename", "metadata.hash": expected_hash})
 
         # Check that put was called with correct arguments.
         # Note that we're only checking the hash of the data, as the date will vary.
@@ -317,7 +317,7 @@ class TestMongoDBClient(unittest.TestCase):
         self.assertEqual(return_value, None)
 
         # Check that find was called with correct arguments
-        mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename"})
+        mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename", "metadata.hash": expected_hash})
         mock_gridfs.return_value.put.assert_not_called()
         self.mock_connect.assert_called_once()
 
@@ -326,13 +326,12 @@ class TestMongoDBClient(unittest.TestCase):
     def test_insert_file_existing_no_match(self, mock_mongo_client, mock_gridfs):
         mock_db = MagicMock()
         mock_mongo_client.return_value = {"test_db": mock_db}
-        mock_gridfs.return_value.find.return_value = [{"metadata": {"hash": "test_hash"}}]
+        mock_gridfs.return_value.find.return_value = []
 
         return_value = self.client.insert_file(b"test_data", "test_filename")
         self.assertNotEqual(return_value, None)
 
         # Check that find was called with correct arguments
-        mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename"})
         mock_gridfs.return_value.put.assert_called_once()
         self.mock_connect.assert_called_once()
 

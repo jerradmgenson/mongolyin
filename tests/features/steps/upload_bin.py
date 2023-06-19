@@ -18,6 +18,23 @@ import gridfs
 from behave import *
 
 
+@given("we have existing binary data in the database")
+def step_impl(context):
+    kwargs = dict(
+        host=context.mongo_address,
+        username=context.mongo_username,
+        password=context.mongo_password,
+    )
+
+    with pymongo.MongoClient(**kwargs) as client:
+        db = client["db"]
+        fs = gridfs.GridFS(db)
+        context.test_data = b"123456789qwertyuiop"
+        context.filename = "data1.bin"
+        context.metadata = {"hash": "testhash"}
+        fs.put(context.test_data, filename=context.filename, metadata=context.metadata)
+
+
 @then("it should upload the binary data into MongoDB")
 def step_impl(context):
     kwargs = dict(
@@ -39,3 +56,28 @@ def step_impl(context):
                     file_contents = fp.read()
 
                 assert file_contents == results[0].read()
+
+
+@then("it should upload binary data for the modified file")
+def step_impl(context):
+    kwargs = dict(
+        host=context.mongo_address,
+        username=context.mongo_username,
+        password=context.mongo_password,
+    )
+
+    with pymongo.MongoClient(**kwargs) as client:
+        db = client[context.mongo_dbname]
+        fs = gridfs.GridFS(db)
+        results = list(fs.find({"filename": context.filename}))
+        assert len(results) == 2
+        matches_test_data = False
+        not_matches_test_data = False
+        for result in results:
+            if result.metadata["hash"] == context.metadata["hash"]:
+                matches_test_data = True
+
+            else:
+                not_matches_test_data = True
+
+        assert matches_test_data and not_matches_test_data

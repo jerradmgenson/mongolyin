@@ -34,14 +34,34 @@ class TestDispatch(unittest.TestCase):
         self.mock_run_graph = MagicMock()
 
     def test_create_dispatch(self):
-        mock_dispatch = mongolyin.create_dispatch(
+        dispatch, process = mongolyin.create_dispatch(
             self.mock_mongo_client,
             TEST_INGRESS_PATH,
             create_graph=self.mock_create_graph,
             run_graph=self.mock_run_graph,
         )
 
-        mock_dispatch(TEST_FILEPATH)
+        dispatch(TEST_FILEPATH)
+        self.mock_create_graph.assert_not_called()
+        self.mock_run_graph.assert_not_called()
+        process()
+        self.mock_create_graph.assert_called_once()
+        self.mock_run_graph.assert_called_once()
+
+    def test_dont_process_duplicate_event(self):
+        dispatch, process = mongolyin.create_dispatch(
+            self.mock_mongo_client,
+            TEST_INGRESS_PATH,
+            create_graph=self.mock_create_graph,
+            run_graph=self.mock_run_graph,
+        )
+
+        dispatch(TEST_FILEPATH)
+        dispatch(TEST_FILEPATH)
+        self.mock_create_graph.assert_not_called()
+        self.mock_run_graph.assert_not_called()
+        process()
+        process()
         self.mock_create_graph.assert_called_once()
         self.mock_run_graph.assert_called_once()
 

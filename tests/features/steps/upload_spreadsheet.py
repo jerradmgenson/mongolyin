@@ -11,10 +11,41 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import os
 import pandas as pd
+from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 
 import pymongo
 from behave import *
+
+
+@given("we have existing csv data in the database")
+def step_impl(context):
+    kwargs = dict(
+        host=context.mongo_address,
+        username=context.mongo_username,
+        password=context.mongo_password,
+    )
+
+    with pymongo.MongoClient(**kwargs) as client:
+        db = client["db"]
+        collection = db["collection"]
+        context.filename = "data1.csv"
+        test_data = [
+            {"ID": 1, "Name": "Apple", "Quantity": 10, "Price": 0.5},
+            {"ID": 2, "Name": "Orange", "Quantity": 15, "Price": 0.4},
+        ]
+
+        context.test_data = test_data
+        test_data = deepcopy(test_data)
+        for doc in test_data:
+            metadata = dict(
+                hash=sha256(str(doc).encode()).hexdigest(),
+                filename=context.filename,
+            )
+            doc["metadata"] = metadata
+
+        collection.insert_many(test_data)
 
 
 @then("it should upload the spreadsheet data into MongoDB")
@@ -40,3 +71,24 @@ def step_impl(context):
 
                 for record in df.to_dict(orient="records"):
                     assert len(list(collection.find(record))) == 1
+
+
+@then("it should upload csv data for the modified file")
+def step_impl(context):
+    kwargs = dict(
+        host=context.mongo_address,
+        username=context.mongo_username,
+        password=context.mongo_password,
+    )
+
+    with pymongo.MongoClient(**kwargs) as client:
+        db = client[context.mongo_dbname]
+        collection = db[context.mongo_collection]
+        results = list(collection.find(
+            {"metadata.filename": "data1.csv"},
+            {"ID": 1, "Name": 1, "Quantity": 1, "Price": 1, "_id": 0},
+        ))
+        assert len(results) == 4
+        test_data = {tuple(t.items()) for t in context.test_data}
+        results = {tuple(r.items()) for r in results}
+        assert results > test_data
