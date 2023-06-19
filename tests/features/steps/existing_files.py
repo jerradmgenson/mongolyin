@@ -1,5 +1,5 @@
 """
-Behave steps for upload_json.feature
+Behave steps for existing_files.feature
 
 Copyright 2023 Jerrad Michael Genson
 
@@ -11,19 +11,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import os
 import re
-import json
 import tempfile
-import shutil
+import time
 import subprocess
+import pandas as pd
 from pathlib import Path
 
 import pymongo
+import gridfs
 from behave import *
 
 import utils
 
 
-@when("we run mongolyin.py and copy files into the directory")
+@given("we have a directory with preexisting files")
+def step_impl(context):
+    context.inputdir = Path(context.text.strip())
+    assert context.inputdir.exists()
+    context.mongo_dbname = context.inputdir.parts[1]
+    context.mongo_collection = context.inputdir.parts[2]
+
+
+@when("we run mongolyin.py on the directory with preexisting files")
 def step_impl(context):
     text = context.text.format(
         address=context.mongo_address,
@@ -32,29 +41,19 @@ def step_impl(context):
     )
 
     args = list(re.split(r"\s+", text))
-    existing = False
-    context.inputdir = Path(args[0])
     with tempfile.TemporaryDirectory() as tmpdirname:
-        args[0] = tmpdirname
         args = ["python", "-m", "mongolyin.mongolyin"] + args
         with tempfile.TemporaryFile("w+") as stderr:
             try:
                 process = subprocess.Popen(args, stderr=stderr)
                 utils.wait_for_ready(stderr)
-                tmpdir = Path(tmpdirname)
-                context.mongo_dbname = "db"
-                context.mongo_collection = "collection"
-                collection_dir = tmpdir / context.mongo_dbname / context.mongo_collection
-                collection_dir.mkdir(parents=True)
-                shutil.copytree(context.inputdir, collection_dir, dirs_exist_ok=True)
-                filenames = list(utils.read_filenames(context.inputdir))
-                utils.wait_for_upload(stderr, filenames)
+                time.sleep(5)
 
             finally:
                 process.terminate()
 
 
-@then("it should upload the json data into MongoDB")
+@then("it should not upload the files")
 def step_impl(context):
     kwargs = dict(
         host=context.mongo_address,
@@ -68,8 +67,5 @@ def step_impl(context):
         for root, _, files in os.walk(context.inputdir):
             root = Path(root)
             for file_ in files:
-                filepath = root / file_
-                with filepath.open() as fp:
-                    file_data = json.load(fp)
-
-                assert len(list(collection.find(file_data))) == 1
+                results = list(collection.find({"metadata": {"filename": file_}}))
+                assert len(results) == 0
