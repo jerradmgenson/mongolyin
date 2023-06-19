@@ -52,6 +52,7 @@ import collections.abc
 collections.Iterable = collections.abc.Iterable
 
 import bonobo
+import clevercsv
 import pandas as pd
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -366,7 +367,7 @@ def extract_pandas(filepath):
     """
 
     if filepath.suffix == ".csv":
-        df = pd.read_csv(filepath)
+        df = clevercsv.wrappers.read_dataframe(filepath)
 
     elif filepath.suffix == ".parquet":
         df = pd.read_parquet(filepath)
@@ -377,7 +378,41 @@ def extract_pandas(filepath):
     else:
         raise ValueError(f"This extractor can not read '{filepath.suffix} files.'")
 
+    df = convert_strings_to_numbers(df)
+
     return df.to_dict(orient="records")
+
+
+def convert_strings_to_numbers(df):
+    """
+    Converts string columns to numeric where possible in a DataFrame.
+
+    This function iterates over each column in a DataFrame. If the column
+    type is 'object' (Pandas' internal type for string), it tries to convert
+    the column to a numeric type. If any value in the column cannot be
+    converted to a numeric type, the function leaves the column as strings.
+    In addition, it replaces commas with periods before attempting the
+    conversion.
+
+    Args:
+        df (pd.DataFrame): The DataFrame whose string columns are to be
+                           converted to numeric where possible.
+
+    Returns:
+        pd.DataFrame: The DataFrame with string columns converted to numeric
+                      where possible.
+
+    """
+
+    for col in df.columns:
+        if df[col].dtype == 'object':  # if the column is a string
+            try:
+                # Replace commas with periods and attempt conversion to numeric
+                df[col] = pd.to_numeric(df[col].str.replace(',', '.'), errors='raise')
+
+            except ValueError:
+                pass  # If any value raises a ValueError when converting, leave the column as strings
+    return df
 
 
 def extract_json(filepath):

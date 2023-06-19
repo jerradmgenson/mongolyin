@@ -64,7 +64,14 @@ def step_impl(context):
             for file_ in files:
                 filepath = root / file_
                 if filepath.suffix == ".csv":
-                    df = pd.read_csv(filepath)
+                    if filepath.stem == "data6":
+                        df = pd.read_csv(filepath, sep=";")
+
+                    elif filepath.stem == "data7":
+                        df = pd.read_csv(filepath, sep=";", decimal=",")
+
+                    else:
+                        df = pd.read_csv(filepath)
 
                 else:
                     df = pd.read_excel(filepath)
