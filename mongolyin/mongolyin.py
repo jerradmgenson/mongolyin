@@ -42,7 +42,6 @@ import logging
 import os
 import sys
 import time
-from collections import defaultdict
 from queue import Queue, Empty
 from functools import partial
 from pathlib import Path
@@ -59,11 +58,9 @@ from watchdog.observers import Observer
 
 from mongolyin.mongodbclient import MongoDBClient
 
-CLEANUP_FREQUENCY = 30  # 30 seconds
-CLEANUP_SIZE = 10485760  # 10 MB
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_COLLECTION_NAME = "misc"
-INGEST_FREQUENCY = 0.05
+INGEST_FREQUENCY = 1
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".csv", ".parquet")
 
@@ -116,7 +113,7 @@ def main(argv):
     with MongoDBClient(*mongodb_client_args) as mongo_client:
         dispatch, process = create_dispatch(mongo_client, clargs.ingress_path)
         event_handler = FileChangeHandler(dispatch)
-        watch_directory(clargs.ingress_path, INGEST_FREQUENCY, event_handler, process)
+        watch_directory(clargs.ingress_path, event_handler, process)
 
     return 0
 
@@ -185,13 +182,12 @@ def configure_logging(loglevel):
     root_logger.addHandler(stream_handler)
 
 
-def watch_directory(path, ingest_frequency, event_handler, process):
+def watch_directory(path, event_handler, process):
     """
     Monitors the directory for changes and triggers event handler when changes occur.
 
     Args:
         path: The path to the directory to monitor.
-        ingest_frequency: The frequency at which to check for changes, in seconds.
         event_handler: The event handler to use with the Observer instance.
         process: Function to call to process dispatch arguments.
 
@@ -204,8 +200,11 @@ def watch_directory(path, ingest_frequency, event_handler, process):
         observer.start()
         logger.debug("mongolyin ready")
         while True:
-            process()
-            time.sleep(ingest_frequency)
+            new_events = True
+            while new_events:
+                new_events = process()
+
+            time.sleep(INGEST_FREQUENCY)
 
     except KeyboardInterrupt:
         pass
@@ -215,7 +214,7 @@ def watch_directory(path, ingest_frequency, event_handler, process):
         observer.join()
 
 
-def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_graph=bonobo.run, debounce_time=2):
+def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_graph=bonobo.run, debounce_time=0.1):
     """
     Creates a dispatch function which handles the ingestion of different
     file types.
@@ -229,8 +228,9 @@ def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_g
                                        graph. Defaults to bonobo.Graph.
         run_graph (func, optional): A function to execute a bonobo graph.
                                     Defaults to bonobo.run.
-        debounce_time (float, optional): Number of seconds that must pass before
-                                         processing the same file again.
+        debounce_time (float, optional): Number of seconds that must pass after
+                                         the last event arrives before we begin
+                                         processing events.
 
     Returns:
         dispatch (func): A function capable of processing and uploading
@@ -241,45 +241,48 @@ def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_g
     """
 
     queue = Queue()
-    file_record = defaultdict(int)
-    last_cleanup = time.time()
-    logger = logging.getLogger(__name__)
+    unique_events = set()
 
     def process():
-        nonlocal last_cleanup
+        last_event_time = time.time()
+        changes_detected = False
+        while True:
+            try:
+                unique_events.add(queue.get_nowait())
+                changes_detected = True
+                last_event_time = time.time()
 
-        current_time = time.time()
-        try:
-            filepath = queue.get_nowait()
-            if current_time - file_record[filepath] < debounce_time:
-                logging.debug("Already processed %s within last %d seconds, skipping", filepath, debounce_time)
-                return
+            except Empty:
+                if not changes_detected:
+                    # Break immediately if there's nothing in the queue
+                    # and no new event detected.
+                    break
 
-            def get_filepaths():
-                yield filepath
+                else:
+                    if time.time() - last_event_time >= debounce_time:
+                        break
 
-            new_client = update_mongodb_client(mongo_client, ingress_path, filepath)
-            if new_client is None:
-                return
+                    else:
+                        time.sleep(debounce_time - (time.time() - last_event_time))
 
-            extract, load = select_etl_functions(filepath, new_client)
-            graph = create_graph()
-            graph.add_chain(get_filepaths, file_ready_check, extract, load)
-            run_graph(graph)
-            file_record[filepath] = current_time
-            if (current_time - last_cleanup > CLEANUP_FREQUENCY or sys.getsizeof(file_record) > CLEANUP_SIZE):
-                to_delete = []
-                for key, timestamp in file_record.items():
-                    if timestamp - current_time > debounce_time:
-                        to_delete.append(key)
+        if not unique_events:
+            return False
 
-                for key in to_delete:
-                    del file_record[key]
+        filepath = unique_events.pop()
 
-                last_cleanup = current_time
+        def get_filepaths():
+            yield filepath
 
-        except Empty:
-            pass
+        new_client = update_mongodb_client(mongo_client, ingress_path, filepath)
+        if new_client is None:
+            return True
+
+        extract, load = select_etl_functions(filepath, new_client)
+        graph = create_graph()
+        graph.add_chain(get_filepaths, file_ready_check, extract, load)
+        run_graph(graph)
+
+        return True
 
     return queue.put, process
 
