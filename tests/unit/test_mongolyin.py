@@ -16,6 +16,9 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+import pandas as pd
+import numpy as np
+
 from mongolyin import mongolyin
 
 PANDAS_EXTENSIONS = [".csv", ".parquet", ".xls", ".xlsx", ".xlsm", ".xlsb", ".odf", ".ods", ".odt"]
@@ -198,6 +201,126 @@ class TestFileReadyCheck(unittest.TestCase):
 
         except OSError:
             self.fail("file_ready_check raised OSError unexpectedly!")
+
+
+class TestConvertStringsToNumbers(unittest.TestCase):
+    def setUp(self):
+        self.convert_strings_to_numbers = mongolyin.convert_strings_to_numbers
+
+    def test_conversion(self):
+        # DataFrame with numeric strings and non-numeric strings
+        df = pd.DataFrame({
+            'numeric_commas': ['1,1', '2,2', '3,3'],
+            'numeric_dots': ['4.4', '5.5', '6.6'],
+            'non_numeric': ['a', 'b', 'c']
+        })
+
+        converted_df = self.convert_strings_to_numbers(df)
+
+        # Expected output after conversion
+        expected_df = pd.DataFrame({
+            'numeric_commas': [1.1, 2.2, 3.3],
+            'numeric_dots': [4.4, 5.5, 6.6],
+            'non_numeric': ['a', 'b', 'c']
+        })
+
+        # Checking if converted DataFrame equals to expected DataFrame
+        pd.testing.assert_frame_equal(converted_df, expected_df)
+
+    def test_preserves_nans(self):
+        # DataFrame with missing values
+        df = pd.DataFrame({
+            'numeric_commas': ['1,1', np.nan, '3,3'],
+            'numeric_dots': ['4.4', np.nan, '6.6'],
+            'non_numeric': ['a', np.nan, 'c']
+        })
+
+        converted_df = self.convert_strings_to_numbers(df)
+
+        # Expected output after conversion
+        expected_df = pd.DataFrame({
+            'numeric_commas': [1.1, np.nan, 3.3],
+            'numeric_dots': [4.4, np.nan, 6.6],
+            'non_numeric': ['a', np.nan, 'c']
+        })
+
+        # Checking if converted DataFrame equals to expected DataFrame
+        pd.testing.assert_frame_equal(converted_df, expected_df)
+
+    def test_genuine_string(self):
+        # DataFrame with a genuine string column containing commas
+        df = pd.DataFrame({
+            'numeric_commas': ['1,1', '2,2', '3,3'],
+            'genuine_string': ['a,b', 'c,d', 'e,f']
+        })
+
+        converted_df = self.convert_strings_to_numbers(df)
+
+        # Expected output after conversion
+        expected_df = pd.DataFrame({
+            'numeric_commas': [1.1, 2.2, 3.3],
+            'genuine_string': ['a,b', 'c,d', 'e,f']  # Should stay the same
+        })
+
+        pd.testing.assert_frame_equal(converted_df, expected_df)
+
+    def test_empty_dataframe(self):
+        # Empty DataFrame
+        df = pd.DataFrame()
+
+        converted_df = self.convert_strings_to_numbers(df)
+
+        # Expected output after conversion is the same empty DataFrame
+        expected_df = pd.DataFrame()
+
+        pd.testing.assert_frame_equal(converted_df, expected_df)
+
+    def test_no_string_columns(self):
+        # DataFrame without any string columns
+        df = pd.DataFrame({
+            'numeric1': [1.1, 2.2, 3.3],
+            'numeric2': [4, 5, 6]
+        })
+
+        converted_df = self.convert_strings_to_numbers(df)
+
+        # Expected output after conversion is the same DataFrame
+        expected_df = pd.DataFrame({
+            'numeric1': [1.1, 2.2, 3.3],
+            'numeric2': [4, 5, 6]
+        })
+
+        pd.testing.assert_frame_equal(converted_df, expected_df)
+
+    def test_almost_numeric_single_row(self):
+        # DataFrame where string column would be numeric except for a single row
+        df = pd.DataFrame({
+            'almost_numeric': ['1,1', '2,2', 'not numeric']
+        })
+
+        converted_df = self.convert_strings_to_numbers(df)
+
+        # Expected output after conversion should have the column unchanged
+        expected_df = pd.DataFrame({
+            'almost_numeric': ['1,1', '2,2', 'not numeric']
+        })
+
+        pd.testing.assert_frame_equal(converted_df, expected_df)
+
+    def test_almost_numeric_multiple_commas(self):
+        # DataFrame where string column would be numeric except for multiple commas
+        df = pd.DataFrame({
+            'almost_numeric': ['1,1', '2,2,2', '3,3']
+        })
+
+        converted_df = self.convert_strings_to_numbers(df)
+
+        # Expected output after conversion should have the column unchanged
+        expected_df = pd.DataFrame({
+            'almost_numeric': ['1,1', '2,2,2', '3,3']
+        })
+
+        pd.testing.assert_frame_equal(converted_df, expected_df)
 
 
 if __name__ == "__main__":
