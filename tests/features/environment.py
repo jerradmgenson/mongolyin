@@ -12,6 +12,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import time
 import subprocess
 import string
+import shutil
 import random
 
 import docker
@@ -48,6 +49,8 @@ def before_scenario(context, scenario):
 
 def after_scenario(context, scenario):
     context.container.stop()
+    if hasattr(context, "tmpdir"):
+        shutil.rmtree(context.tmpdir)
 
 
 def wait_for_mongo(db_uri, timeout=30):
