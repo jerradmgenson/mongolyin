@@ -7,6 +7,6 @@
               """
               When we run mongolyin.py on the directory with preexisting files
               """
-              tests/data/json --address {address} --username {username} --password {password} --loglevel debug
+              tests/data/json --address {address} --username {username} --password {password} --loglevel debug --sleep-time 0.001
               """
               Then it should not upload the files

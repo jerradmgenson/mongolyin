@@ -42,26 +42,21 @@ import logging
 import os
 import sys
 import time
+from collections import deque
 from queue import Queue, Empty
 from functools import partial
 from pathlib import Path
 
-# Setup deprecated alias to fix broken bonobo imports.
-import collections
-import collections.abc
-collections.Iterable = collections.abc.Iterable
-
-import bonobo
 import clevercsv
 import pandas as pd
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from mongolyin import etl
 from mongolyin.mongodbclient import MongoDBClient
 
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_COLLECTION_NAME = "misc"
-INGEST_FREQUENCY = 1
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".csv", ".parquet")
 
@@ -114,7 +109,7 @@ def main(argv):
     with MongoDBClient(*mongodb_client_args) as mongo_client:
         dispatch, process = create_dispatch(mongo_client, clargs.ingress_path)
         event_handler = FileChangeHandler(dispatch)
-        watch_directory(clargs.ingress_path, event_handler, process)
+        watch_directory(clargs.ingress_path, event_handler, process, clargs.sleep_time)
 
     return 0
 
@@ -141,24 +136,36 @@ def parse_command_line(argv):
     parser.add_argument(
         "--username", help="Username to use to authenticate with the MongoDB server."
     )
+
     parser.add_argument(
         "--password", help="Password to use to authenticate with the MongoDB server."
     )
+
     parser.add_argument(
         "--auth-db", help="Name of the MongoDB authentication database to use."
     )
+
     parser.add_argument(
         "--db",
         help="Name of the database to write file data to. If this isn't given, directory names are used instead.",
     )
+
     parser.add_argument(
         "--collection",
         help="Name of the collection to write file data. If this isn't given, subdirectory names are used instead.",
     )
+
     parser.add_argument(
         "--loglevel",
         default="info",
         help="Level to use for logging messages.",
+    )
+
+    parser.add_argument(
+        "--sleep-time",
+        default=2,
+        type=float,
+        help="Time (in seconds) to sleep in-between checking for file changes.",
     )
 
     return parser.parse_args(args=argv)
@@ -183,7 +190,7 @@ def configure_logging(loglevel):
     root_logger.addHandler(stream_handler)
 
 
-def watch_directory(path, event_handler, process):
+def watch_directory(path, event_handler, process, sleep_time):
     """
     Monitors the directory for changes and triggers event handler when changes occur.
 
@@ -191,21 +198,24 @@ def watch_directory(path, event_handler, process):
         path: The path to the directory to monitor.
         event_handler: The event handler to use with the Observer instance.
         process: Function to call to process dispatch arguments.
+        sleep_time: Time (in seconds) to sleep in-between checking for
+                    new events.
 
     """
 
-    observer = Observer()
+    observer = Observer(timeout=sleep_time)
     observer.schedule(event_handler, path, recursive=True)
     logger = logging.getLogger(__name__)
     try:
         observer.start()
         logger.debug("mongolyin ready")
         while True:
+            logger.debug("Checking for new events...")
             new_events = True
             while new_events:
                 new_events = process()
 
-            time.sleep(INGEST_FREQUENCY)
+            time.sleep(sleep_time)
 
     except KeyboardInterrupt:
         pass
@@ -215,7 +225,7 @@ def watch_directory(path, event_handler, process):
         observer.join()
 
 
-def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_graph=bonobo.run, debounce_time=0.1):
+def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
     """
     Creates a dispatch function which handles the ingestion of different
     file types.
@@ -225,10 +235,6 @@ def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_g
                                       perform database operations.
         ingress_path (str): The base directory which files are being
                             ingested from.
-        create_graph (func, optional): A function to create a new bonobo
-                                       graph. Defaults to bonobo.Graph.
-        run_graph (func, optional): A function to execute a bonobo graph.
-                                    Defaults to bonobo.run.
         debounce_time (float, optional): Number of seconds that must pass after
                                          the last event arrives before we begin
                                          processing events.
@@ -241,51 +247,88 @@ def create_dispatch(mongo_client, ingress_path, create_graph=bonobo.Graph, run_g
 
     """
 
-    queue = Queue()
-    unique_events = set()
+    event_queue = Queue()
+    debounce_queue = SetQueue()
 
     def process():
+        """
+        Processes events from `dispatch()` by running them through an ETL pipeline.
+
+        The function operates in a loop checking the event queue for new files.
+        When a new file is detected, it is added to a debounce queue to be
+        processed after a debounce time period.
+
+        The debounce queue is a unique set of files waiting to be processed.
+        It ensures the same file isn't processed multiple times if detected more
+        than once within the debounce period.
+
+        If an ETLException is raised during the 'file ready check' or 'load' stages
+        of the pipeline, the filepath is added back into the debounce queue
+        to be processed again later.
+
+        If the event queue is empty and no new events have been detected within
+        the debounce time, the function breaks out of the loop and returns False.
+
+        Returns:
+            bool: False if the event queue and debounce queue are empty and no
+                  new events have been detected within the debounce time.
+                  True otherwise, indicating a successful processing.
+
+        """
+
         last_event_time = time.time()
         changes_detected = False
-        while True:
+        while True:  # Debounce loop
             try:
-                unique_events.add(queue.get_nowait())
+                debounce_queue.push(event_queue.get_nowait())
                 changes_detected = True
                 last_event_time = time.time()
 
             except Empty:
+                # event_queue is empty
                 if not changes_detected:
                     # Break immediately if there's nothing in the queue
-                    # and no new event detected.
+                    # and no new events are detected.
                     break
 
                 else:
+                    # If there was an initial event, continue looping until no
+                    # new events arrive during the debounce period.
                     if time.time() - last_event_time >= debounce_time:
+                        # Debounce period exceeded without new events.
                         break
 
-                    else:
-                        time.sleep(debounce_time - (time.time() - last_event_time))
+                    elif (delay := debounce_time - (time.time() - last_event_time)) > 0:
+                        # Still within debounce period - sleep and continue looping.
+                        time.sleep(delay)
 
-        if not unique_events:
+        if not debounce_queue:
             return False
 
-        filepath = unique_events.pop()
-
-        def get_filepaths():
-            yield filepath
-
+        filepath = debounce_queue.pop()
         new_client = update_mongodb_client(mongo_client, ingress_path, filepath)
         if new_client is None:
             return True
 
         extract, load = select_etl_functions(filepath, new_client)
-        graph = create_graph()
-        graph.add_chain(get_filepaths, file_ready_check, extract, load)
-        run_graph(graph)
+        pipeline = etl.Pipeline(
+            etl.Stage("file ready check", file_ready_check),
+            etl.Stage("extract", extract),
+            etl.Stage("load", load),
+        )
+
+        try:
+            pipeline.run(filepath)
+
+        except etl.ETLException as etle:
+            if etle.stage_name in ("file ready check", "load"):
+                debounce_queue.push(filepath)
+
+            return False
 
         return True
 
-    return queue.put, process
+    return event_queue.put, process
 
 
 def select_etl_functions(filepath, mongo_client):
@@ -577,6 +620,61 @@ class FileChangeHandler(FileSystemEventHandler):
             logger = logging.getLogger(__name__)
             logger.info("File added: %s", event.src_path)
             self._dispatch(Path(event.src_path))
+
+
+class SetQueue:
+    """
+    A combined set and queue (deque) data structure.
+
+    Implements a deque where items are unique. Trying to add an item that already exists
+    in the SetQueue is a no-op.
+
+    Attributes:
+        queue (deque): The queue that stores the items.
+        set_ (set): The set that ensures the uniqueness of items.
+
+    """
+
+    def __init__(self):
+        self._queue = deque()
+        self._set = set()
+
+    def push(self, item):
+        """
+        Push an item to the queue.
+
+        If the item is already in the SetQueue, it doesn't do anything.
+
+        Args:
+            item: The item to be pushed to the queue.
+
+        """
+
+        if item not in self._set:
+            self._queue.append(item)
+            self._set.add(item)
+
+    def pop(self):
+        """
+        Pop an item from the queue.
+
+        Returns:
+            The popped item.
+
+        Raises:
+            IndexError: If the SetQueue is empty.
+
+        """
+
+        item = self._queue.popleft()
+        self._set.remove(item)
+        return item
+
+    def __contains__(self, item):
+        return item in self._set
+
+    def __len__(self):
+        return len(self._queue)
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ from typing import List, Optional
 import gridfs
 import pymongo
 
-SLEEP_TIME = 30
+SLEEP_TIME = 5
 
 
 def with_retry(func):
@@ -45,6 +45,9 @@ def with_retry(func):
     @wraps(func)
     def wrapped_func(self, *args, retry=1, **kwargs):
         logger = logging.getLogger(__name__)
+        if self._client:
+            self.close()
+
         if retry < 0:
             raise MaxRetriesExceeded("Exceeded maximum number of retries")
 
@@ -52,15 +55,11 @@ def with_retry(func):
             return func(self, *args, **kwargs)
 
         except pymongo.errors.AutoReconnect as ar:
-            logger.exception(ar)
-            if retry > 0:
-                time.sleep(SLEEP_TIME)
-                self._connect()
-
+            logger.debug(str(ar))
             return wrapped_func(self, *args, retry=retry - 1, **kwargs)
 
         except pymongo.errors.OperationFailure as of:
-            logger.exception(of)
+            logger.debug(str(of))
             if retry > 0:
                 time.sleep(SLEEP_TIME)
 
@@ -103,8 +102,6 @@ class MongoDBClient:
         self._db_name = db
         self._collection_name = collection
         self._client = client
-        if self._client is None:
-            self._connect()
 
     def __enter__(self):
         return self
@@ -141,9 +138,20 @@ class MongoDBClient:
             logger = logging.getLogger(__name__)
             logger.exception(e)
 
+        finally:
+            self._client = None
+
+
+    @property
+    def client(self):
+        if self._client is None:
+            self._connect()
+
+        return self._client
+
     @property
     def db(self):
-        return self._client[self._db_name]
+        return self.client[self._db_name]
 
     @property
     def collection(self):
@@ -185,7 +193,7 @@ class MongoDBClient:
                     return None
 
         insert_result = self.collection.insert_one(document)
-        logger.info("'%s' inserted into database", filename)
+        logger.info("'%s' inserted into database with id '%s'", filename, insert_result.inserted_id)
         return insert_result.inserted_id
 
     @with_retry
@@ -273,8 +281,8 @@ class MongoDBClient:
         }
 
         result = self.fs.put(data, filename=filename, metadata=metadata)
-        logger.info("'%s' inserted into database", filename)
-        return result.inserted_id
+        logger.info("'%s' inserted into database with id '%s'", filename, result)
+        return result
 
     def with_db(self, db_name: str):
         """

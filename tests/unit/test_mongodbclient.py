@@ -69,6 +69,7 @@ class TestMongoDBClient(unittest.TestCase):
         mock_mongo_client.return_value = mock_client
         mongo_client = MongoDBClient(*client_args)
         mongo_client._connect()
+        mongo_client._connect()
         self.assertEqual(mock_mongo_client.call_count, 2)
         mock_client.close.assert_called_once()
 
@@ -95,7 +96,6 @@ class TestMongoDBClient(unittest.TestCase):
 
         mock_collection.insert_one.assert_called_once_with(document)
         self.assertEqual(result, mock_insert_result.inserted_id)
-        self.mock_connect.assert_called_once()
         mock_collection.find.assert_called_once_with(
             {"metadata.filename": {"$eq": "test_filename"}}, {"metadata": 1}
         )
@@ -114,7 +114,6 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_document(document, "test_filename")
         mock_collection.insert_one.assert_not_called()
         self.assertEqual(result, None)
-        self.mock_connect.assert_called_once()
         mock_collection.find.assert_called_once_with(
             {"metadata.filename": {"$eq": "test_filename"}}, {"metadata": 1}
         )
@@ -136,7 +135,6 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_document(document, "test_filename")
         mock_collection.insert_one.assert_called_once_with(document)
         self.assertEqual(result, mock_insert_result.inserted_id)
-        self.mock_connect.assert_called_once()
         mock_collection.find.assert_called_once_with(
             {"metadata.filename": {"$eq": "test_filename"}}, {"metadata": 1}
         )
@@ -155,7 +153,6 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_document(document, "test_filename")
         mock_collection.insert_one.assert_called_once_with(document)
         self.assertEqual(result, mock_insert_result.inserted_id)
-        self.mock_connect.assert_called_once()
         mock_collection.find.assert_called_once_with(
             {"metadata.filename": {"$eq": "test_filename"}}, {"metadata": 1}
         )
@@ -178,9 +175,7 @@ class TestMongoDBClient(unittest.TestCase):
 
         self.assertEqual(mock_collection.insert_one.call_count, 2)
         self.assertEqual(mock_collection.find.call_count, 2)
-        self.assertEqual(mock_logger.exception.call_count, 2)
-        self.assertEqual(mock_sleep.call_count, 1)
-        self.assertEqual(self.mock_connect.call_count, 2)
+        self.assertEqual(mock_logger.debug.call_count, 2)
 
     @patch.object(MongoDBClient, "collection")
     @patch("logging.getLogger")
@@ -198,9 +193,8 @@ class TestMongoDBClient(unittest.TestCase):
 
         self.assertEqual(mock_collection.insert_one.call_count, 2)
         self.assertEqual(mock_collection.find.call_count, 2)
-        self.assertEqual(mock_logger.exception.call_count, 2)
+        self.assertEqual(mock_logger.debug.call_count, 2)
         self.assertEqual(mock_sleep.call_count, 1)
-        self.mock_connect.assert_called_once()
 
     @patch.object(MongoDBClient, "collection")
     def test_insert_documents_no_existing(self, mock_collection):
@@ -217,7 +211,6 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_documents(documents, "test_filename")
         mock_collection.insert_many.assert_called_once()
         self.assertEqual(result, mock_insert_result.inserted_ids)
-        self.mock_connect.assert_called_once()
         mock_collection.find.assert_called_once_with(
             {"metadata.filename": "test_filename"}, {"metadata": 1}
         )
@@ -246,7 +239,6 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_documents(documents, "test_filename")
         mock_collection.insert_many.assert_not_called()
         self.assertEqual(result, None)
-        self.mock_connect.assert_called_once()
         mock_collection.find.assert_called_once_with(
             {"metadata.filename": "test_filename"}, {"metadata": 1}
         )
@@ -275,14 +267,14 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_documents(documents, "test_filename")
         mock_collection.insert_many.assert_called_once()
         self.assertEqual(result, mock_insert_result.inserted_ids)
-        self.mock_connect.assert_called_once()
         mock_collection.find.assert_called_once_with(
             {"metadata.filename": "test_filename"}, {"metadata": 1}
         )
 
     @patch("gridfs.GridFS")
     @patch("pymongo.MongoClient")
-    def test_insert_file_no_existing(self, mock_mongo_client, mock_gridfs):
+    @patch.object(MongoDBClient, "client")
+    def test_insert_file_no_existing(self, mock_client, mock_mongo_client, mock_gridfs):
         mock_db = MagicMock()
         mock_mongo_client.return_value = {"test_db": mock_db}
         mock_gridfs.return_value.find.return_value = []
@@ -301,11 +293,11 @@ class TestMongoDBClient(unittest.TestCase):
         self.assertEqual(kwargs["filename"], "test_filename")
         self.assertEqual(kwargs["metadata"]["hash"], expected_hash)
         self.assertIsInstance(kwargs["metadata"]["date"], datetime.datetime)
-        self.mock_connect.assert_called_once()
 
     @patch("gridfs.GridFS")
     @patch("pymongo.MongoClient")
-    def test_insert_file_existing_match(self, mock_mongo_client, mock_gridfs):
+    @patch.object(MongoDBClient, "client")
+    def test_insert_file_existing_match(self, mock_client, mock_mongo_client, mock_gridfs):
         # SHA-256 of b'test_data'
         expected_hash = "e7d87b738825c33824cf3fd32b7314161fc8c425129163ff5e7260fc7288da36"
 
@@ -319,11 +311,11 @@ class TestMongoDBClient(unittest.TestCase):
         # Check that find was called with correct arguments
         mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename", "metadata.hash": expected_hash})
         mock_gridfs.return_value.put.assert_not_called()
-        self.mock_connect.assert_called_once()
 
     @patch("gridfs.GridFS")
     @patch("pymongo.MongoClient")
-    def test_insert_file_existing_no_match(self, mock_mongo_client, mock_gridfs):
+    @patch.object(MongoDBClient, "client")
+    def test_insert_file_existing_no_match(self, mock_client, mock_mongo_client, mock_gridfs):
         mock_db = MagicMock()
         mock_mongo_client.return_value = {"test_db": mock_db}
         mock_gridfs.return_value.find.return_value = []
@@ -333,7 +325,6 @@ class TestMongoDBClient(unittest.TestCase):
 
         # Check that find was called with correct arguments
         mock_gridfs.return_value.put.assert_called_once()
-        self.mock_connect.assert_called_once()
 
     def test_with_db_existing(self):
         new_client = self.client.with_db("new_db")

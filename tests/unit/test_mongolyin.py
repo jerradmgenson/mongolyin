@@ -20,6 +20,7 @@ import pandas as pd
 import numpy as np
 
 from mongolyin import mongolyin
+from mongolyin import etl
 
 PANDAS_EXTENSIONS = [".csv", ".parquet", ".xls", ".xlsx", ".xlsm", ".xlsb", ".odf", ".ods", ".odt"]
 SPREADSHEET_EXTENSIONS = [".xls", ".xlsx", ".xlsm", ".xlsb", ".odf", ".ods", ".odt"]
@@ -33,40 +34,32 @@ TEST_FILEPATH = TEST_INGRESS_PATH / "db/collection/file.csv"
 class TestDispatch(unittest.TestCase):
     def setUp(self):
         self.mock_mongo_client = MagicMock()
-        self.mock_create_graph = MagicMock()
-        self.mock_run_graph = MagicMock()
 
-    def test_create_dispatch(self):
+    @patch.object(etl.Pipeline, "run")
+    def test_create_dispatch(self, mock_run):
         dispatch, process = mongolyin.create_dispatch(
             self.mock_mongo_client,
             TEST_INGRESS_PATH,
-            create_graph=self.mock_create_graph,
-            run_graph=self.mock_run_graph,
         )
 
         dispatch(TEST_FILEPATH)
-        self.mock_create_graph.assert_not_called()
-        self.mock_run_graph.assert_not_called()
+        mock_run.assert_not_called()
         process()
-        self.mock_create_graph.assert_called_once()
-        self.mock_run_graph.assert_called_once()
+        mock_run.assert_called_once()
 
-    def test_dont_process_duplicate_event(self):
+    @patch.object(etl.Pipeline, "run")
+    def test_dont_process_duplicate_event(self, mock_run):
         dispatch, process = mongolyin.create_dispatch(
             self.mock_mongo_client,
             TEST_INGRESS_PATH,
-            create_graph=self.mock_create_graph,
-            run_graph=self.mock_run_graph,
         )
 
         dispatch(TEST_FILEPATH)
         dispatch(TEST_FILEPATH)
-        self.mock_create_graph.assert_not_called()
-        self.mock_run_graph.assert_not_called()
+        mock_run.assert_not_called()
         process()
         process()
-        self.mock_create_graph.assert_called_once()
-        self.mock_run_graph.assert_called_once()
+        mock_run.assert_called_once()
 
 
 class TestSubPath(unittest.TestCase):
@@ -321,6 +314,35 @@ class TestConvertStringsToNumbers(unittest.TestCase):
         })
 
         pd.testing.assert_frame_equal(converted_df, expected_df)
+
+
+class TestSetQueue(unittest.TestCase):
+    def setUp(self):
+        self.set_queue = mongolyin.SetQueue()
+
+    def test_push(self):
+        self.set_queue.push('item1')
+        self.set_queue.push('item2')
+        self.set_queue.push('item1')  # This should be ignored
+        self.assertEqual(len(self.set_queue), 2)
+        self.assertIn('item1', self.set_queue)
+        self.assertIn('item2', self.set_queue)
+
+    def test_pop(self):
+        self.set_queue.push('item1')
+        self.set_queue.push('item2')
+        popped_item = self.set_queue.pop()
+        self.assertEqual(popped_item, 'item1')
+        self.assertNotIn(popped_item, self.set_queue)
+
+    def test_pop_empty(self):
+        with self.assertRaises(IndexError):
+            self.set_queue.pop()
+
+    def test_contains(self):
+        self.set_queue.push('item1')
+        self.assertIn('item1', self.set_queue)
+        self.assertNotIn('item2', self.set_queue)
 
 
 if __name__ == "__main__":

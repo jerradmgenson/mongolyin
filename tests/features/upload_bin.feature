@@ -3,7 +3,7 @@
             Scenario: Upload new binary files from a collection directory
               When we run mongolyin.py and copy files into the directory
               """
-              tests/data/bin --address {address} --username {username} --password {password} --loglevel debug
+              tests/data/bin --address {address} --username {username} --password {password} --loglevel debug --sleep-time 0.001
               """
               Then it should upload the binary data into MongoDB
 
@@ -11,6 +11,6 @@
               Given we have existing binary data in the database
               When we run mongolyin.py and copy files into the directory
               """
-              tests/data/bin --address {address} --username {username} --password {password} --loglevel debug
+              tests/data/bin --address {address} --username {username} --password {password} --loglevel debug --sleep-time 0.001
               """
               Then it should upload binary data for the modified file
