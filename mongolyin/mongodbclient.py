@@ -121,7 +121,8 @@ class MongoDBClient:
         """
 
         try:
-            self._client.close()
+            if self._client:
+                self._client.close()
 
         except (pymongo.errors.ConnectionFailure, pymongo.errors.AutoReconnect) as e:
             logger = logging.getLogger(__name__)
