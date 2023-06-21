@@ -12,7 +12,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import copy
 import datetime
 import logging
-import time
 from functools import wraps
 from hashlib import sha256
 from typing import List, Optional
@@ -20,50 +19,40 @@ from typing import List, Optional
 import gridfs
 import pymongo
 
-SLEEP_TIME = 5
 
-
-def with_retry(func):
+def disconnect_on_error(func):
     """
-    Add a keyword argument 'retry' to 'func' that causes 'func' to be retried
-    'retry' times upon encountering a 'pymongo.errors.AutoReconnect' or
-    'pymongo.errors.OperationFailure' exception. Also log exception if/when one
-    occurs and call 'self._connect()' when an 'AutoReconnect' exception occurs
-    to attempt to reconnect manually.
+    A decorator that disconnects a pymongo client when an error occurs, and re-raises the exception.
+
+    This function is intended to be used as a decorator for methods of a
+    class that maintain an active pymongo client connection (stored in
+    `self._client`). When a decorated method raises either a `pymongo.errors.AutoReconnect`
+    or `pymongo.errors.OperationFailure` exception, the decorator catches
+    the exception, disconnects the client by calling `self.close()`, logs the error,
+    and then re-raises the exception.
 
     Args:
-      func: The function to wrap.
+        func (Callable): The function to be decorated. It is expected to be a
+                         method of a class that contains `self._client` and
+                         `self.close()` for managing a pymongo client connection.
 
     Returns:
-      The wrapped function.
-
-    Raises:
-      MaxRetriesExceeded
-
+        Callable: The decorated function which disconnects the client upon
+                  encountering specified pymongo errors and re-raises the exception.
     """
 
     @wraps(func)
-    def wrapped_func(self, *args, retry=1, **kwargs):
-        logger = logging.getLogger(__name__)
-        if self._client:
-            self.close()
-
-        if retry < 0:
-            raise MaxRetriesExceeded("Exceeded maximum number of retries")
-
+    def wrapped_func(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)
 
-        except pymongo.errors.AutoReconnect as ar:
-            logger.debug(str(ar))
-            return wrapped_func(self, *args, retry=retry - 1, **kwargs)
+        except (pymongo.errors.AutoReconnect, pymongo.errors.OperationFailure) as e:
+            if self._client:
+                self.close()
 
-        except pymongo.errors.OperationFailure as of:
-            logger.debug(str(of))
-            if retry > 0:
-                time.sleep(SLEEP_TIME)
-
-            return wrapped_func(self, *args, retry=retry - 1, **kwargs)
+            logger = logging.getLogger(__name__)
+            logger.debug("Closed pymongo client due to error: %s", str(e))
+            raise
 
     return wrapped_func
 
