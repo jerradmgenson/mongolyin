@@ -3,7 +3,7 @@ name: Python application
 on: [push]
 
 jobs:
-  "commit gate":
+  commit_gate:
 
     runs-on: ubuntu-latest
 
