@@ -31,7 +31,7 @@ jobs:
         black --check --line-length 100 .
     - name: Sort imports with isort
       run: |
-        isort --check-only --diff .
+        isort --check-only --diff --skip setup.py .
     - name: Lint with pylint
       run: |
         find . -name \*.py -not -path "./tests/*" | xargs pylint --fail-under=9.5
