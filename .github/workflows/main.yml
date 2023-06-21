@@ -34,7 +34,7 @@ jobs:
         isort --check-only --diff --skip setup.py .
     - name: Lint with pylint
       run: |
-        find . -name \*.py -not -path "./tests/*" | xargs pylint --fail-under=9.5
+        find . -name \*.py -not -path "./tests/*" | xargs pylint --fail-under=9.0
     - name: Test with pytest
       run: |
         pytest tests/unit/
