@@ -10,14 +10,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 """
 
 import json
-import tempfile
-import time
 import re
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 import pymongo
-
 import utils
 
 MAX_WAIT_TIME = 70

@@ -130,7 +130,6 @@ class MongoDBClient:
         finally:
             self._client = None
 
-
     @property
     def client(self):
         if self._client is None:

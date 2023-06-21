@@ -10,15 +10,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 """
 
 import json
+import os
+import re
+import subprocess
 import tempfile
 import time
-import re
-import os
-import subprocess
 from pathlib import Path
 
 import pymongo
-
 import utils
 
 MAX_WAIT_TIME = 70
@@ -105,9 +104,15 @@ def step_impl(context):
         with context.tmpfile.open() as fp:
             logs = fp.read()
 
-        if all([re.search(r"File added: .+data\.json", logs),
-                re.search(r"Not uploading .+data\.json because it isn't in a database directory", logs),
-                "inserted into database with id" not in logs]):
+        if all(
+            [
+                re.search(r"File added: .+data\.json", logs),
+                re.search(
+                    r"Not uploading .+data\.json because it isn't in a database directory", logs
+                ),
+                "inserted into database with id" not in logs,
+            ]
+        ):
             return
 
     assert False

@@ -10,10 +10,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 """
 
 import os
-import time
 import random
 import string
 import subprocess
+import time
 
 import docker
 import pymongo
@@ -86,7 +86,7 @@ def wait_for_mongo(db_uri, timeout=30):
     while True:
         try:
             # The ismaster command is cheap and does not require auth.
-            client.admin.command('ismaster')
+            client.admin.command("ismaster")
             break
         except ServerSelectionTimeoutError:
             if time.time() - start_time > timeout:
@@ -107,14 +107,16 @@ def read_filenames(directory):
         for file_ in files:
             yield file_
 
-
     client = docker.from_env()
     try:
         client.images.get("mongo_testdb")
 
     except docker.errors.ImageNotFound:
         print("Test MongoDB image not found, building...")
-        subprocess.check_call(["docker", "build", "-f", "Dockerfile.testdb", "-t", "mongo_testdb", "."])
+        subprocess.check_call(
+            ["docker", "build", "-f", "Dockerfile.testdb", "-t", "mongo_testdb", "."]
+        )
+
 
 def start_mongodb(context, password=None):
     """
@@ -128,17 +130,17 @@ def start_mongodb(context, password=None):
         context.mongo_password = password
 
     else:
-        context.mongo_password = ''.join(random.choices(string.ascii_letters + string.digits, k=20))
+        context.mongo_password = "".join(random.choices(string.ascii_letters + string.digits, k=20))
 
     context.mongo_address = "mongodb://localhost:27018"
     context.container = context.docker.containers.run(
         "mongo_testdb",
         detach=True,
-        ports={'27017/tcp': 27018},
+        ports={"27017/tcp": 27018},
         remove=True,
         environment={
             "MONGO_INITDB_ROOT_USERNAME": context.mongo_username,
-            "MONGO_INITDB_ROOT_PASSWORD": context.mongo_password
+            "MONGO_INITDB_ROOT_PASSWORD": context.mongo_password,
         },
     )
 

@@ -11,14 +11,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 
 import unittest
-from mongolyin.etl import Stage, Pipeline, ETLException
+
+from mongolyin.etl import ETLException, Pipeline, Stage
+
 
 class TestETL(unittest.TestCase):
-
     def setUp(self):
-        self.stage1 = Stage('stage1', lambda x: x*2)
-        self.stage2 = Stage('stage2', lambda x: x-1)
-        self.stage3 = Stage('stage3', lambda x: x/0)  # This stage will cause an error
+        self.stage1 = Stage("stage1", lambda x: x * 2)
+        self.stage2 = Stage("stage2", lambda x: x - 1)
+        self.stage3 = Stage("stage3", lambda x: x / 0)  # This stage will cause an error
         self.pipeline = Pipeline(self.stage1, self.stage2, self.stage3)
 
     def test_pipeline(self):
@@ -33,7 +34,8 @@ class TestETL(unittest.TestCase):
             self.pipeline.run(2)
 
         exception = cm.exception
-        self.assertEqual(exception.stage_name, 'stage3')
+        self.assertEqual(exception.stage_name, "stage3")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

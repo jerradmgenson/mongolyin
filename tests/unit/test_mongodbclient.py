@@ -248,7 +248,9 @@ class TestMongoDBClient(unittest.TestCase):
         self.client.insert_file(b"test_data", "test_filename")
 
         # Check that find was called with correct arguments
-        mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename", "metadata.hash": expected_hash})
+        mock_gridfs.return_value.find.assert_called_once_with(
+            {"filename": "test_filename", "metadata.hash": expected_hash}
+        )
 
         # Check that put was called with correct arguments.
         # Note that we're only checking the hash of the data, as the date will vary.
@@ -272,7 +274,9 @@ class TestMongoDBClient(unittest.TestCase):
         self.assertEqual(return_value, None)
 
         # Check that find was called with correct arguments
-        mock_gridfs.return_value.find.assert_called_once_with({"filename": "test_filename", "metadata.hash": expected_hash})
+        mock_gridfs.return_value.find.assert_called_once_with(
+            {"filename": "test_filename", "metadata.hash": expected_hash}
+        )
         mock_gridfs.return_value.put.assert_not_called()
 
     @patch("gridfs.GridFS")

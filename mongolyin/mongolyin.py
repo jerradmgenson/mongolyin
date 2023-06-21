@@ -43,9 +43,9 @@ import os
 import sys
 import time
 from collections import deque
-from queue import Queue, Empty
 from functools import partial
 from pathlib import Path
+from queue import Empty, Queue
 
 import clevercsv
 import pandas as pd
@@ -80,12 +80,18 @@ def main(argv):
     logger.debug("mongolyin started")
     username = clargs.username if clargs.username else os.environ.get("MONGODB_USERNAME")
     if not username:
-        print("You must supply --username or define `MONGODB_USERNAME` in the environment.", file=sys.stderr)
+        print(
+            "You must supply --username or define `MONGODB_USERNAME` in the environment.",
+            file=sys.stderr,
+        )
         return 1
 
     password = clargs.password if clargs.password else os.environ.get("MONGODB_PASSWORD")
     if not password:
-        print("You must supply --password or define `MONGODB_PASSWORD` in the environment.", file=sys.stderr)
+        print(
+            "You must supply --password or define `MONGODB_PASSWORD` in the environment.",
+            file=sys.stderr,
+        )
         return 1
 
     auth_db = clargs.auth_db if clargs.auth_db else os.environ.get("MONGO_AUTH_DB", "admin")
@@ -141,9 +147,7 @@ def parse_command_line(argv):
         "--password", help="Password to use to authenticate with the MongoDB server."
     )
 
-    parser.add_argument(
-        "--auth-db", help="Name of the MongoDB authentication database to use."
-    )
+    parser.add_argument("--auth-db", help="Name of the MongoDB authentication database to use.")
 
     parser.add_argument(
         "--db",
@@ -448,10 +452,10 @@ def convert_strings_to_numbers(df):
     """
 
     for col in df.columns:
-        if df[col].dtype == 'object':  # if the column is a string
+        if df[col].dtype == "object":  # if the column is a string
             try:
                 # Replace commas with periods and attempt conversion to numeric
-                df[col] = pd.to_numeric(df[col].str.replace(',', '.'), errors='raise')
+                df[col] = pd.to_numeric(df[col].str.replace(",", "."), errors="raise")
 
             except ValueError:
                 pass  # If any value raises a ValueError when converting, leave the column as strings

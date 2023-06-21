@@ -11,18 +11,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import os
 import re
-import tempfile
-import time
 import shutil
 import subprocess
-import pandas as pd
+import tempfile
+import time
 from pathlib import Path
 
-import pymongo
 import gridfs
-from behave import *
-
+import pandas as pd
+import pymongo
 import utils
+from behave import *
 
 
 @given("we have a directory with preexisting files")

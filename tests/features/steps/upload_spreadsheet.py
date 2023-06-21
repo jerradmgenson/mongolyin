@@ -10,11 +10,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 """
 
 import os
-import pandas as pd
 from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 
+import pandas as pd
 import pymongo
 from behave import *
 
@@ -91,10 +91,12 @@ def step_impl(context):
     with pymongo.MongoClient(**kwargs) as client:
         db = client[context.mongo_dbname]
         collection = db[context.mongo_collection]
-        results = list(collection.find(
-            {"metadata.filename": "data1.csv"},
-            {"ID": 1, "Name": 1, "Quantity": 1, "Price": 1, "_id": 0},
-        ))
+        results = list(
+            collection.find(
+                {"metadata.filename": "data1.csv"},
+                {"ID": 1, "Name": 1, "Quantity": 1, "Price": 1, "_id": 0},
+            )
+        )
         assert len(results) == 4
         test_data = {tuple(t.items()) for t in context.test_data}
         results = {tuple(r.items()) for r in results}

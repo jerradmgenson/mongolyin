@@ -9,19 +9,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 """
 
+import json
 import os
 import re
-import json
-import tempfile
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
-import pymongo
 import gridfs
-from behave import *
-
+import pymongo
 import utils
+from behave import *
 
 
 @given("we have defined our MongoDB username and password in environment variables")

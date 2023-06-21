@@ -17,6 +17,7 @@ from steps.utils import start_mongodb
 def before_scenario(context, scenario):
     start_mongodb(context)
 
+
 def after_scenario(context, scenario):
     context.container.stop()
     if hasattr(context, "tmpdir"):

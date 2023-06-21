@@ -9,18 +9,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 """
 
+import json
 import os
 import re
-import json
-import tempfile
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pymongo
-from behave import *
-
 import utils
+from behave import *
 
 
 @given("we have existing json data in the database")
