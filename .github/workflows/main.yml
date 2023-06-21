@@ -20,10 +20,10 @@ jobs:
         pip install black
         pip install isort
         pip install pylint
-	pip install pymongo
-	pip install watchdog
-	pip install clevercsv
-	pip install pandas
+        pip install pymongo
+        pip install watchdog
+        pip install clevercsv
+        pip install pandas
     - name: Lint with black
       run: |
         black --check --line-length 100 .
