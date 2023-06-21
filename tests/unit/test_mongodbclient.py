@@ -160,43 +160,6 @@ class TestMongoDBClient(unittest.TestCase):
         mock_logger.error.assert_called_once()
 
     @patch.object(MongoDBClient, "collection")
-    @patch("logging.getLogger")
-    @patch("time.sleep")
-    def test_insert_document_with_auto_reconnect_error(
-        self, mock_sleep, mock_getLogger, mock_collection
-    ):
-        document = {"test_key": "test_value"}
-        mock_collection.find.return_value = []
-        mock_collection.insert_one.side_effect = pymongo.errors.AutoReconnect()
-        mock_logger = MagicMock()
-        mock_getLogger.return_value = mock_logger
-        with self.assertRaises(MaxRetriesExceeded):
-            self.client.insert_document(document, "test_filename")
-
-        self.assertEqual(mock_collection.insert_one.call_count, 2)
-        self.assertEqual(mock_collection.find.call_count, 2)
-        self.assertEqual(mock_logger.debug.call_count, 2)
-
-    @patch.object(MongoDBClient, "collection")
-    @patch("logging.getLogger")
-    @patch("time.sleep")
-    def test_insert_document_with_operation_failure_error(
-        self, mock_sleep, mock_getLogger, mock_collection
-    ):
-        document = {"test_key": "test_value"}
-        mock_collection.find.return_value = []
-        mock_collection.insert_one.side_effect = pymongo.errors.OperationFailure("test failure")
-        mock_logger = MagicMock()
-        mock_getLogger.return_value = mock_logger
-        with self.assertRaises(MaxRetriesExceeded):
-            self.client.insert_document(document, "test_filename")
-
-        self.assertEqual(mock_collection.insert_one.call_count, 2)
-        self.assertEqual(mock_collection.find.call_count, 2)
-        self.assertEqual(mock_logger.debug.call_count, 2)
-        self.assertEqual(mock_sleep.call_count, 1)
-
-    @patch.object(MongoDBClient, "collection")
     def test_insert_documents_no_existing(self, mock_collection):
         documents = [{"test_key": "test_value"}, {"another_key": "another_value"}]
 

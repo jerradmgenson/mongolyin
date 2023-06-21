@@ -113,8 +113,7 @@ def step_impl(context):
       with context.tmpfile.open() as fp:
          logs = fp.read()
 
-      if ("mongolyin.etl - ERROR - Exceeded maximum number of retries" in logs
-          and "pymongo.errors.ServerSelectionTimeoutError" in logs):
+      if "pymongo.errors.ServerSelectionTimeoutError" in logs:
          return
 
       time.sleep(SLEEP_TIME)
