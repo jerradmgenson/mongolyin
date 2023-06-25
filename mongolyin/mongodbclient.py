@@ -12,9 +12,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import copy
 import datetime
 import logging
-from functools import wraps, singledispatchmethod
+from functools import singledispatchmethod, wraps
 from hashlib import sha256
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import gridfs
 import pymongo
