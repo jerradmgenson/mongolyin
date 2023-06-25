@@ -171,7 +171,7 @@ class TestMongoDBClient(unittest.TestCase):
         ]
         mock_collection.insert_many.return_value = mock_insert_result
         mock_collection.find.return_value = []
-        result = self.client.insert_documents(documents, "test_filename")
+        result = self.client.insert_document(documents, "test_filename")
         mock_collection.insert_many.assert_called_once()
         self.assertEqual(result, mock_insert_result.inserted_ids)
         mock_collection.find.assert_called_once_with(
@@ -199,7 +199,7 @@ class TestMongoDBClient(unittest.TestCase):
             return_value.append({"metadata": {"hash": exp_hash}})
 
         mock_collection.find.return_value = return_value
-        result = self.client.insert_documents(documents, "test_filename")
+        result = self.client.insert_document(documents, "test_filename")
         mock_collection.insert_many.assert_not_called()
         self.assertEqual(result, None)
         mock_collection.find.assert_called_once_with(
@@ -227,7 +227,7 @@ class TestMongoDBClient(unittest.TestCase):
             return_value.append({"metadata": {"hash": exp_hash}})
 
         mock_collection.find.return_value = return_value
-        result = self.client.insert_documents(documents, "test_filename")
+        result = self.client.insert_document(documents, "test_filename")
         mock_collection.insert_many.assert_called_once()
         self.assertEqual(result, mock_insert_result.inserted_ids)
         mock_collection.find.assert_called_once_with(

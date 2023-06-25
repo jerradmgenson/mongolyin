@@ -12,9 +12,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import copy
 import datetime
 import logging
-from functools import wraps
+from functools import singledispatchmethod, wraps
 from hashlib import sha256
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import gridfs
 import pymongo
@@ -150,8 +150,9 @@ class MongoDBClient:
     def fs(self):
         return gridfs.GridFS(self.db)
 
+    @singledispatchmethod
     @disconnect_on_error
-    def insert_document(self, document: dict, filename: str) -> Optional[str]:
+    def insert_document(self, document: Dict, filename: str) -> Optional[str]:
         """
         Insert a single document into the MongoDB collection.
 
@@ -191,8 +192,9 @@ class MongoDBClient:
         logger.info("'%s' inserted into database with id '%s'", filename, insert_result.inserted_id)
         return insert_result.inserted_id
 
+    @insert_document.register(list)
     @disconnect_on_error
-    def insert_documents(self, documents: List[dict], filename: str) -> Optional[List[str]]:
+    def _(self, documents: List[Dict], filename: str) -> Optional[List[str]]:
         """
         Insert multiple documents into the MongoDB collection.
 

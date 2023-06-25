@@ -352,7 +352,7 @@ def select_etl_functions(filepath, mongo_client):
 
     if filepath.suffix in PANDAS_EXTENSIONS:
         extract = extract_pandas
-        load = partial(mongo_client.insert_documents, filename=filepath.name)
+        load = partial(mongo_client.insert_document, filename=filepath.name)
 
     elif filepath.suffix == ".json":
         extract = extract_json

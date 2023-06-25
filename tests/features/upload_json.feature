@@ -21,3 +21,10 @@
               {inputdir} --address {address} --username {username} --password {password} --loglevel debug --sleep-time 0.001
               """
               Then it should upload the json data using GridFS
+
+            Scenario: Upload a JSON list
+              When we run mongolyin.py and copy a json list file into the directory
+              """
+              {inputdir} --address {address} --username {username} --password {password} --loglevel debug --sleep-time 0.001
+              """
+              Then it should upload the json data using insert_many
