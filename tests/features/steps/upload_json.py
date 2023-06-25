@@ -20,10 +20,9 @@ from pathlib import Path
 
 import gridfs
 import pymongo
+import utils
 from behave import *
 from bson import BSON
-
-import utils
 
 
 @given("we have existing json data in the database")
