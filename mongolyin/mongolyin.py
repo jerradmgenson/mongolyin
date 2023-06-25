@@ -58,7 +58,7 @@ from mongolyin.mongodbclient import MongoDBClient
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_COLLECTION_NAME = "misc"
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
-PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".csv", ".parquet")
+PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".parquet",)
 
 
 def main(argv):
@@ -354,6 +354,9 @@ def select_etl_functions(filepath, mongo_client):
         extract = extract_pandas
         load = partial(mongo_client.insert_document, filename=filepath.name)
 
+    elif filepath.suffix == ".csv":
+        extract = clevercsv.wrappers.stream_dicts
+
     elif filepath.suffix == ".json":
         extract = extract_json
         load = partial(mongo_client.insert_document, filename=filepath.name)
@@ -413,10 +416,7 @@ def extract_pandas(filepath):
 
     """
 
-    if filepath.suffix == ".csv":
-        df = clevercsv.wrappers.read_dataframe(filepath)
-
-    elif filepath.suffix == ".parquet":
+    if filepath.suffix == ".parquet":
         df = pd.read_parquet(filepath)
 
     elif filepath.suffix in SPREADSHEET_EXTENSIONS:
