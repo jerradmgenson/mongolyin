@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 
 import gridfs
-import pandas as pd
 import pymongo
 from behave import *
 

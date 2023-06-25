@@ -181,7 +181,13 @@ class MongoDBClient:
                     logger.info("'%s' already exists in database, skipping", filename)
                     return None
 
-        insert_result = self.collection.insert_one(document)
+        try:
+            insert_result = self.collection.insert_one(document)
+
+        except pymongo.errors.DocumentTooLarge:
+            logger.warning("'%s' exceeds max document size. Inserting with GridFS", filename)
+            return self.insert_file(str(document).encode(), filename)
+
         logger.info("'%s' inserted into database with id '%s'", filename, insert_result.inserted_id)
         return insert_result.inserted_id
 

@@ -14,3 +14,10 @@
               tests/data/json --address {address} --username {username} --password {password} --loglevel debug --sleep-time 0.001
               """
               Then it should upload json data for the modified file
+
+            Scenario: Upload a JSON file greater than 16793598 bytes
+              When we run mongolyin.py and copy a large json file into the directory
+              """
+              {inputdir} --address {address} --username {username} --password {password} --loglevel debug --sleep-time 0.001
+              """
+              Then it should upload the json data using GridFS
