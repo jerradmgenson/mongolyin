@@ -179,3 +179,51 @@ def step_impl(context):
         fs = gridfs.GridFS(db)
         results = list(fs.find({"filename": context.filename}))
         assert len(results) == 1
+
+
+@when("we run mongolyin.py and copy a json list file into the directory")
+def step_impl(context):
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        tmpdir = Path(tmpdirname)
+        text = context.text.format(
+            inputdir=tmpdirname,
+            address=context.mongo_address,
+            username=context.mongo_username,
+            password=context.mongo_password,
+        )
+
+        args = list(re.split(r"\s+", text))
+        args = ["python", "-m", "mongolyin.mongolyin"] + args
+        with tempfile.TemporaryFile("w+") as stderr:
+            try:
+                process = subprocess.Popen(args, stderr=stderr)
+                utils.wait_for_ready(stderr)
+                context.mongo_dbname = "db"
+                context.mongo_collection = "collection"
+                collection_dir = tmpdir / context.mongo_dbname / context.mongo_collection
+                collection_dir.mkdir(parents=True)
+                filepath = collection_dir / "data.json"
+                context.filename = filepath.name
+                data = [{"val": 1}, {"val": 2}]
+                with filepath.open("w") as fp:
+                    json.dump(data, fp)
+
+                utils.wait_for_upload(stderr, [context.filename])
+
+            finally:
+                process.terminate()
+
+
+@then("it should upload the json data using insert_many")
+def step_impl(context):
+    kwargs = dict(
+        host=context.mongo_address,
+        username=context.mongo_username,
+        password=context.mongo_password,
+    )
+
+    with pymongo.MongoClient(**kwargs) as client:
+        db = client[context.mongo_dbname]
+        collection = db[context.mongo_collection]
+        results = list(collection.find({"metadata.filename": "data.json"}))
+        assert len(results) == 2
