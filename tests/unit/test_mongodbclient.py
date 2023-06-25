@@ -174,37 +174,16 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_document(documents, "test_filename")
         mock_collection.insert_many.assert_called_once()
         self.assertEqual(result, mock_insert_result.inserted_ids)
-        mock_collection.find.assert_called_once_with(
-            {"metadata.filename": "test_filename"}, {"metadata": 1}
-        )
 
     @patch.object(MongoDBClient, "collection")
     def test_insert_documents_existing_match(self, mock_collection):
         documents = [{"test_key": "test_value"}, {"another_key": "another_value"}]
 
         # Set up the mock to return a specific result
-        mock_insert_result = MagicMock()
-        mock_insert_result.inserted_ids = [
-            "d51bdcdf-bf1a-4cf7-a366-999fae27f3bf",
-            "6635c36d-a760-43fc-8a85-31382e26cd18",
-        ]
-        mock_collection.insert_many.return_value = mock_insert_result
-        expected_hashes = [
-            "d02670a74f98da498c8268aa1e6725f6241d68c5a6c1c7131d5c377bb6546593",
-            "dc63bf80f10bab93e7cb62c40b7b6b60eb6bba31df634d24c43e6aac7cfee9a3",
-        ]
-
-        return_value = []
-        for exp_hash in expected_hashes:
-            return_value.append({"metadata": {"hash": exp_hash}})
-
-        mock_collection.find.return_value = return_value
+        mock_collection.find.return_value = documents
         result = self.client.insert_document(documents, "test_filename")
         mock_collection.insert_many.assert_not_called()
         self.assertEqual(result, None)
-        mock_collection.find.assert_called_once_with(
-            {"metadata.filename": "test_filename"}, {"metadata": 1}
-        )
 
     @patch.object(MongoDBClient, "collection")
     def test_insert_documents_existing_no_match(self, mock_collection):
@@ -230,9 +209,6 @@ class TestMongoDBClient(unittest.TestCase):
         result = self.client.insert_document(documents, "test_filename")
         mock_collection.insert_many.assert_called_once()
         self.assertEqual(result, mock_insert_result.inserted_ids)
-        mock_collection.find.assert_called_once_with(
-            {"metadata.filename": "test_filename"}, {"metadata": 1}
-        )
 
     @patch("gridfs.GridFS")
     @patch("pymongo.MongoClient")

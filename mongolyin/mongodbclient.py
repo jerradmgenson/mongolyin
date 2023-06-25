@@ -264,10 +264,13 @@ class MongoDBClient:
         existing_hashes = set()
 
         # Fetch all documents with that filename and only the metadata field
-        existing_documents = self.collection.find({"metadata.filename": filename}, {"metadata": 1})
+        existing_documents = self.collection.find(
+            {"metadata.filename": filename}, {"metadata": 0, "_id": 0}
+        )
         for doc in existing_documents:
             with ExceptionLogger((KeyError, TypeError)):
-                existing_hashes.add(doc["metadata"]["hash"])
+                document_hash = sha256(str(doc).encode()).hexdigest()
+                existing_hashes.add(document_hash)
 
         # Prepare documents with metadata and check against existing hashes
         for document in documents:
@@ -276,10 +279,9 @@ class MongoDBClient:
                 document["metadata"] = {}
 
             document["metadata"]["filename"] = filename
-            document["metadata"]["hash"] = document_hash
             document["metadata"]["date"] = datetime.datetime.now(datetime.timezone.utc)
 
-            if document["metadata"]["hash"] not in existing_hashes:
+            if document_hash not in existing_hashes:
                 new_documents.append(document)
 
             else:
