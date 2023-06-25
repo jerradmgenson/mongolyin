@@ -101,9 +101,7 @@ def gridfs_fallback(func):
 
         except pymongo.errors.DocumentTooLarge:
             logger = logging.getLogger(__name__)
-            logger.warning(
-                "'%s' exceeds max document size. Inserting with GridFS", filename
-            )
+            logger.warning("'%s' exceeds max document size. Inserting with GridFS", filename)
             return self.insert_file(str(document).encode(), filename)
 
     return wrapped_func
@@ -228,9 +226,7 @@ class MongoDBClient:
         document["metadata"]["hash"] = document_hash
         document["metadata"]["filename"] = filename
         document["metadata"]["date"] = datetime.datetime.now(datetime.timezone.utc)
-        docs = self.collection.find(
-            {"metadata.filename": {"$eq": filename}}, {"metadata": 1}
-        )
+        docs = self.collection.find({"metadata.filename": {"$eq": filename}}, {"metadata": 1})
         for doc in docs:
             with ExceptionLogger((KeyError, TypeError)):
                 if doc["metadata"]["hash"] == document["metadata"]["hash"]:
@@ -268,9 +264,7 @@ class MongoDBClient:
         existing_hashes = set()
 
         # Fetch all documents with that filename and only the metadata field
-        existing_documents = self.collection.find(
-            {"metadata.filename": filename}, {"metadata": 1}
-        )
+        existing_documents = self.collection.find({"metadata.filename": filename}, {"metadata": 1})
         for doc in existing_documents:
             with ExceptionLogger((KeyError, TypeError)):
                 existing_hashes.add(doc["metadata"]["hash"])
