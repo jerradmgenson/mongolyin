@@ -57,6 +57,56 @@ def disconnect_on_error(func):
     return wrapped_func
 
 
+def gridfs_fallback(func):
+    """
+    A decorator that provides a fallback mechanism for document insertion
+    using GridFS when the document size exceeds MongoDB's limit.
+
+    This function wraps around another function that performs insertion
+    of a document into MongoDB. If the document size exceeds the maximum
+    BSON document size, the function catches the
+    `pymongo.errors.DocumentTooLarge` exception, logs a warning message,
+    and inserts the document using GridFS instead.
+
+    Args:
+        func (Callable): The function to be decorated. This function
+                         should take as arguments a document to be
+                         inserted into MongoDB and a filename, and should
+                         return an identifier for the inserted document.
+
+    Returns:
+        Callable: The decorated function which provides a fallback mechanism
+                  to insert a document using GridFS when the document size
+                  exceeds MongoDB's limit.
+
+    Wrapped Function Args:
+        document (Dict or List[Dict]): The document(s) to be inserted into
+                                       MongoDB. A document can be a single
+                                       Python dictionary or a list of
+                                       dictionaries.
+        filename (str): The filename associated with the document.
+
+    Wrapped Function Returns:
+        str or List[str]: The ObjectID(s) generated for the inserted
+                          document(s) in MongoDB. It returns the ObjectID
+                          when a single document is inserted and a list
+                          of ObjectIDs when multiple documents are inserted.
+                          In case of failure, the wrapped function returns None.
+    """
+
+    @wraps(func)
+    def wrapped_func(self, document, filename):
+        try:
+            return func(self, document, filename)
+
+        except pymongo.errors.DocumentTooLarge:
+            logger = logging.getLogger(__name__)
+            logger.warning("'%s' exceeds max document size. Inserting with GridFS", filename)
+            return self.insert_file(str(document).encode(), filename)
+
+    return wrapped_func
+
+
 class MongoDBClient:
     """
     A MongoDB client class which abstracts away the connection, insertion and other operations
@@ -152,6 +202,7 @@ class MongoDBClient:
 
     @singledispatchmethod
     @disconnect_on_error
+    @gridfs_fallback
     def insert_document(self, document: Dict, filename: str) -> Optional[str]:
         """
         Insert a single document into the MongoDB collection.
@@ -182,18 +233,17 @@ class MongoDBClient:
                     logger.info("'%s' already exists in database, skipping", filename)
                     return None
 
-        try:
-            insert_result = self.collection.insert_one(document)
-
-        except pymongo.errors.DocumentTooLarge:
-            logger.warning("'%s' exceeds max document size. Inserting with GridFS", filename)
-            return self.insert_file(str(document).encode(), filename)
-
-        logger.info("'%s' inserted into database with id '%s'", filename, insert_result.inserted_id)
+        insert_result = self.collection.insert_one(document)
+        logger.info(
+            "'%s' inserted into database with id '%s'",
+            filename,
+            insert_result.inserted_id,
+        )
         return insert_result.inserted_id
 
     @insert_document.register(list)
     @disconnect_on_error
+    @gridfs_fallback
     def _(self, documents: List[Dict], filename: str) -> Optional[List[str]]:
         """
         Insert multiple documents into the MongoDB collection.
