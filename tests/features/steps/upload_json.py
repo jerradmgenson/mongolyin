@@ -14,12 +14,15 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
+import gridfs
 import pymongo
 import utils
 from behave import *
+from bson import BSON
 
 
 @given("we have existing json data in the database")
@@ -49,7 +52,6 @@ def step_impl(context):
     )
 
     args = list(re.split(r"\s+", text))
-    existing = False
     context.inputdir = Path(args[0])
     with tempfile.TemporaryDirectory() as tmpdirname:
         args[0] = tmpdirname
@@ -115,3 +117,65 @@ def step_impl(context):
                 not_matches_test_data = True
 
         assert matches_test_data and not_matches_test_data
+
+
+@when("we run mongolyin.py and copy a large json file into the directory")
+def step_impl(context):
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        tmpdir = Path(tmpdirname)
+        text = context.text.format(
+            inputdir=tmpdirname,
+            address=context.mongo_address,
+            username=context.mongo_username,
+            password=context.mongo_password,
+        )
+
+        args = list(re.split(r"\s+", text))
+        args = ["python", "-m", "mongolyin.mongolyin"] + args
+        with tempfile.TemporaryFile("w+") as stderr:
+            try:
+                process = subprocess.Popen(args, stderr=stderr)
+                utils.wait_for_ready(stderr)
+                context.mongo_dbname = "db"
+                context.mongo_collection = "collection"
+                collection_dir = tmpdir / context.mongo_dbname / context.mongo_collection
+                collection_dir.mkdir(parents=True)
+                context.filename = "data.json"
+                generate_large_json(collection_dir / context.filename)
+                utils.wait_for_upload(stderr, [context.filename])
+
+            finally:
+                process.terminate()
+
+
+def generate_large_json(path):
+    data = {}
+    bson_data = b""
+    id = 1
+    min_filesize = 17000000
+    while len(bson_data) < min_filesize:
+        for _ in range(10000):
+            user_key = f"User{id}"
+            user_data = {"id": id, "name": f"User{id}"}
+            data[user_key] = user_data
+            id += 1
+
+        bson_data = BSON.encode(data)
+
+    with path.open("w") as fp:
+        json.dump(data, fp)
+
+
+@then("it should upload the json data using GridFS")
+def step_impl(context):
+    kwargs = dict(
+        host=context.mongo_address,
+        username=context.mongo_username,
+        password=context.mongo_password,
+    )
+
+    with pymongo.MongoClient(**kwargs) as client:
+        db = client[context.mongo_dbname]
+        fs = gridfs.GridFS(db)
+        results = list(fs.find({"filename": context.filename}))
+        assert len(results) == 1
