@@ -211,7 +211,8 @@ class MongoDBClient:
         auth_db (str): The name of the MongoDB authentication database to use.
         db (str): The name of the database to write file data to.
         collection (str): The name of the collection to write file data to.
-        buffer_size (int): Maximum number of documents to read from a file for each insertion.
+        buffer_size (int, optional): Maximum number of documents to read from a
+                                     file for each insertion.
         client (MongoClient, optional): An existing MongoDB client object.
 
     """
@@ -224,7 +225,7 @@ class MongoDBClient:
         auth_db: str,
         db: str,
         collection: str,
-        buffer_size: int,
+        buffer_size: int = -1,
         client: pymongo.MongoClient = None,
     ):
         self._address = address
