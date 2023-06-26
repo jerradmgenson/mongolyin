@@ -9,20 +9,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 """
 
-import sys
 import copy
 import datetime
 import gc
 import logging
 from functools import singledispatch, singledispatchmethod, wraps
 from hashlib import sha256
-from typing import Dict, Generator, List, Optional, Set
+from typing import Dict, Generator, List, Optional
 
 import gridfs
 import pandas as pd
 import pymongo
-
-BUFFER_SIZE = 1000
 
 
 @singledispatch
@@ -214,6 +211,7 @@ class MongoDBClient:
         auth_db (str): The name of the MongoDB authentication database to use.
         db (str): The name of the database to write file data to.
         collection (str): The name of the collection to write file data to.
+        buffer_size (int): Maximum number of documents to read from a file for each insertion.
         client (MongoClient, optional): An existing MongoDB client object.
 
     """
@@ -226,6 +224,7 @@ class MongoDBClient:
         auth_db: str,
         db: str,
         collection: str,
+        buffer_size: int,
         client: pymongo.MongoClient = None,
     ):
         self._address = address
@@ -234,6 +233,7 @@ class MongoDBClient:
         self._auth_db = auth_db
         self._db_name = db
         self._collection_name = collection
+        self._buffer_size = buffer_size
         self._client = client
 
     def __enter__(self):
@@ -297,7 +297,9 @@ class MongoDBClient:
     @singledispatchmethod
     @disconnect_on_error
     @gridfs_fallback
-    def insert_document(self, document: Dict, filename: str, existing_documents=None) -> Optional[str]:
+    def insert_document(
+        self, document: Dict, filename: str, existing_documents=None
+    ) -> Optional[str]:
         """
         Insert a single document into the MongoDB collection.
 
@@ -338,7 +340,9 @@ class MongoDBClient:
     @insert_document.register(list)
     @disconnect_on_error
     @gridfs_fallback
-    def _(self, documents: List[Dict], filename: str, existing_documents=None) -> Optional[List[str]]:
+    def _(
+        self, documents: List[Dict], filename: str, existing_documents=None
+    ) -> Optional[List[str]]:
         """
         Insert multiple documents into the MongoDB collection.
 
@@ -409,8 +413,10 @@ class MongoDBClient:
         existing_documents = self._get_existing_documents(filename)
         for d in data:
             data_buffer.append(d)
-            if len(data_buffer) >= BUFFER_SIZE:
-                inserted_ids.extend(self._insert_generator(data_buffer, filename,  existing_documents))
+            if self._buffer_size != -1 and len(data_buffer) >= self._buffer_size:
+                inserted_ids.extend(
+                    self._insert_generator(data_buffer, filename, existing_documents)
+                )
                 data_buffer = []
                 gc.collect()
 
