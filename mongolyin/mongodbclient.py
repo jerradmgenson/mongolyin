@@ -332,7 +332,7 @@ class MongoDBClient:
                 filename,
             )
 
-            logger.info("'%s' inserted into database", filename)
+            logger.debug("'%s' inserted into database", filename)
             return insert_result.inserted_ids
 
         logger.info("No new documents to insert from '%s'", filename)
