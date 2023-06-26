@@ -9,11 +9,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 """
 
+import sys
 import copy
 import datetime
 import gc
 import logging
-from functools import singledispatchmethod, wraps
+from functools import singledispatch, singledispatchmethod, wraps
 from hashlib import sha256
 from typing import Dict, Generator, List, Optional, Set
 
@@ -24,7 +25,18 @@ import pymongo
 BUFFER_SIZE = 1000
 
 
-def convert_strings_to_numbers(df):
+@singledispatch
+def convert_strings_to_numbers(data):
+    """
+    Converts string columns to numeric where possible in tabular data.
+
+    """
+
+    raise TypeError(f"convert_strings_to_numbers does not take arguments of type '{type(data)}'")
+
+
+@convert_strings_to_numbers.register
+def convert_dataframe_strings_to_numbers(df: pd.DataFrame):
     """
     Converts string columns to numeric where possible in a DataFrame.
 
@@ -54,6 +66,52 @@ def convert_strings_to_numbers(df):
             except ValueError:
                 pass  # If any value raises a ValueError when converting, leave the column as strings
     return df
+
+
+@convert_strings_to_numbers.register(list)
+def convert_dict_strings_to_numbers(docs: List[dict]):
+    """
+    Convert columns of string values in a list of dictionaries to numbers if possible.
+
+    Args:
+      docs: list of dict
+        The list of dictionaries to be converted. Each dictionary represents a row of data,
+        and each key-value pair in the dictionary corresponds to a column and its value in that row.
+
+    Returns:
+      list of dict
+        The converted list of dictionaries. Dictionaries are directly modified in the input list.
+
+    """
+
+    convert_columns = {k: None for k, v in docs[0].items() if isinstance(v, str)}
+    for doc in docs:
+        for col, convert in convert_columns.copy().items():
+            try:
+                new_val = doc[col].replace(",", ".")
+                if convert is None or convert == int:
+                    int(new_val)
+                    convert_columns[col] = int
+
+                else:
+                    float(new_val)
+
+            except ValueError:
+                try:
+                    float(new_val)
+                    convert_columns[col] = float
+
+                except ValueError:
+                    del convert_columns[col]
+
+            except AttributeError:
+                del convert_columns[col]
+
+    for doc in docs:
+        for col, convert in convert_columns.items():
+            doc[col] = convert(doc[col].replace(",", "."))
+
+    return docs
 
 
 def disconnect_on_error(func):
@@ -239,7 +297,7 @@ class MongoDBClient:
     @singledispatchmethod
     @disconnect_on_error
     @gridfs_fallback
-    def insert_document(self, document: Dict, filename: str, existing_hashes=None) -> Optional[str]:
+    def insert_document(self, document: Dict, filename: str, existing_documents=None) -> Optional[str]:
         """
         Insert a single document into the MongoDB collection.
 
@@ -280,7 +338,7 @@ class MongoDBClient:
     @insert_document.register(list)
     @disconnect_on_error
     @gridfs_fallback
-    def _(self, documents: List[Dict], filename: str, existing_hashes=None) -> Optional[List[str]]:
+    def _(self, documents: List[Dict], filename: str, existing_documents=None) -> Optional[List[str]]:
         """
         Insert multiple documents into the MongoDB collection.
 
@@ -297,26 +355,31 @@ class MongoDBClient:
 
         logger = logging.getLogger(__name__)
         new_documents = []
-        if not existing_hashes:
-            existing_hashes = self._get_existing_hashes(filename)
+        if not existing_documents:
+            existing_documents = self._get_existing_documents(filename)
 
         # Prepare documents with metadata and check against existing hashes
+        print("Sorted pending documents:", file=sys.stderr)
         for document in documents:
-            document_hash = sha256(str(document).encode()).hexdigest()
+            sorted_items = str(sorted(list(document.items())))
+            print(sorted_items, file=sys.stderr)
+            if sorted_items in existing_documents:
+                logger.info("Document already exists in database, skipping")
+                continue
+
             if "metadata" not in document:
                 document["metadata"] = {}
 
             document["metadata"]["filename"] = filename
             document["metadata"]["date"] = datetime.datetime.now(datetime.timezone.utc)
-
-            if document_hash not in existing_hashes:
-                new_documents.append(document)
-
-            else:
-                logger.info("Document already exists in database, skipping")
+            new_documents.append(document)
 
         if new_documents:
             insert_result = self.collection.insert_many(new_documents)
+            print(f"inserted:", file=sys.stderr)
+            for doc in new_documents:
+                print(doc, file=sys.stderr)
+
             logger.info(
                 "%d new documents inserted into database from '%s'",
                 len(new_documents),
@@ -349,20 +412,20 @@ class MongoDBClient:
 
         inserted_ids = []
         data_buffer = []
-        existing_hashes = self._get_existing_hashes(filename)
+        existing_documents = self._get_existing_documents(filename)
         for d in data:
             data_buffer.append(d)
             if len(data_buffer) >= BUFFER_SIZE:
-                inserted_ids.extend(self._insert_generator(data_buffer, filename,  existing_hashes))
+                inserted_ids.extend(self._insert_generator(data_buffer, filename,  existing_documents))
                 data_buffer = []
                 gc.collect()
 
         if data_buffer:
-            inserted_ids.extend(self._insert_generator(data_buffer, filename, existing_hashes))
+            inserted_ids.extend(self._insert_generator(data_buffer, filename, existing_documents))
 
         return inserted_ids
 
-    def _insert_generator(self, data, filename, existing_hashes):
+    def _insert_generator(self, data, filename, existing_documents):
         """
         Convert a chunk of generator data to pandas DataFrame, preprocess the data,
         and then insert into the MongoDB collection.
@@ -377,24 +440,26 @@ class MongoDBClient:
 
         """
 
-        df = pd.DataFrame.from_records(data)
-        df = convert_strings_to_numbers(df)
-        data = df.to_dict(orient="records")
-        return self.insert_document(data, filename, existing_hashes=existing_hashes)
+        data = [dict(d) for d in data]
+        data = convert_strings_to_numbers(data)
+        return self.insert_document(data, filename, existing_documents=existing_documents)
 
-    def _get_existing_hashes(self, filename):
-        existing_hashes = set()
+    def _get_existing_documents(self, filename):
+        existing_documents = set()
 
-        # Fetch all documents with that filename and only the metadata field
-        existing_documents = self.collection.find(
-            {"metadata.filename": filename}, {"metadata": 0, "_id": 0}
-        )
-        for doc in existing_documents:
-            with ExceptionLogger((KeyError, TypeError)):
-                document_hash = sha256(str(doc).encode()).hexdigest()
-                existing_hashes.add(document_hash)
+        with ExceptionLogger((KeyError, TypeError)):
+            # Fetch all documents with that filename and only the metadata field
+            query_results = self.collection.find(
+                {"metadata.filename": filename}, {"metadata": 0, "_id": 0}
+            )
 
-        return existing_hashes
+        print("Sorted query results:", file=sys.stderr)
+        for doc in query_results:
+            sorted_items = str(sorted(list(doc.items())))
+            print(sorted_items, file=sys.stderr)
+            existing_documents.add(sorted_items)
+
+        return existing_documents
 
     @disconnect_on_error
     def insert_file(self, data: bytes, filename: str) -> Optional[str]:
