@@ -37,9 +37,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 
 import argparse
+import gc
 import json
 import logging
-import gc
 import os
 import sys
 import time
@@ -54,7 +54,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from mongolyin import etl
-from mongolyin.mongodbclient import MongoDBClient
+from mongolyin.mongodbclient import MongoDBClient, convert_strings_to_numbers
 
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_COLLECTION_NAME = "misc"
@@ -434,38 +434,6 @@ def extract_pandas(filepath):
     df = convert_strings_to_numbers(df)
 
     return df.to_dict(orient="records")
-
-
-def convert_strings_to_numbers(df):
-    """
-    Converts string columns to numeric where possible in a DataFrame.
-
-    This function iterates over each column in a DataFrame. If the column
-    type is 'object' (Pandas' internal type for string), it tries to convert
-    the column to a numeric type. If any value in the column cannot be
-    converted to a numeric type, the function leaves the column as strings.
-    In addition, it replaces commas with periods before attempting the
-    conversion.
-
-    Args:
-        df (pd.DataFrame): The DataFrame whose string columns are to be
-                           converted to numeric where possible.
-
-    Returns:
-        pd.DataFrame: The DataFrame with string columns converted to numeric
-                      where possible.
-
-    """
-
-    for col in df.columns:
-        if df[col].dtype == "object":  # if the column is a string
-            try:
-                # Replace commas with periods and attempt conversion to numeric
-                df[col] = pd.to_numeric(df[col].str.replace(",", "."), errors="raise")
-
-            except ValueError:
-                pass  # If any value raises a ValueError when converting, leave the column as strings
-    return df
 
 
 def extract_json(filepath):

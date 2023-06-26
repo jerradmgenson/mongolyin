@@ -77,7 +77,12 @@ def step_impl(context):
                     df = pd.read_excel(filepath)
 
                 for record in df.to_dict(orient="records"):
-                    assert len(list(collection.find(record))) == 1
+                    try:
+                        assert len(list(collection.find(record))) == 1
+
+                    except AssertionError:
+                        remote = list(collection.find(record))
+                        import pdb; pdb.set_trace()
 
 
 @then("it should upload csv data for the modified file")

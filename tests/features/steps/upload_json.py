@@ -71,6 +71,9 @@ def step_impl(context):
 
             finally:
                 process.terminate()
+                stderr.seek(0)
+                logs = stderr.read()
+                print(logs)
 
 
 @then("it should upload the json data into MongoDB")
