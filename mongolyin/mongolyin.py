@@ -49,6 +49,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 import clevercsv
+import ijson
 import pandas as pd
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -381,14 +382,54 @@ def select_etl_functions(filepath, mongo_client):
         load = partial(mongo_client.insert_generator, filename=filepath.name)
 
     elif filepath.suffix == ".json":
-        extract = extract_json
-        load = partial(mongo_client.insert_document, filename=filepath.name)
+        if get_json_type(filepath) == "dict":
+            extract = extract_json
+            load = partial(mongo_client.insert_document, filename=filepath.name)
+
+        else:
+            extract = extract_json_chunks
+            load = partial(mongo_client.insert_generator, filename=filepath.name)
 
     else:
         extract = extract_bin
         load = partial(mongo_client.insert_file, filename=filepath.name)
 
     return extract, load
+
+
+def get_json_type(filepath):
+    """
+    Determines if the root of the JSON file is a list or a dictionary.
+
+    This function reads the first non-whitespace character from a JSON file to determine
+    if the root of the JSON structure is a list or a dictionary. If the first character
+    is '[', it returns 'list'. If it's '{', it returns 'dict'. Otherwise, it raises a
+    ValueError.
+
+    Args:
+        filename (Path): Path of the JSON file.
+
+    Returns:
+        str: 'list' if the root of the JSON file is a list, 'dict' if it's a dictionary.
+
+    Raises:
+        ValueError: If the JSON file does not start with '[' or '{'.
+    """
+
+    with filepath.open() as file:
+        for chunk in iter(lambda: file.read(1), ""):
+            for char in chunk:
+                if not char.isspace():
+                    if char == "[":
+                        return "list"
+
+                    elif char == "{":
+                        return "dict"
+
+                    else:
+                        raise ValueError("JSON file does not start with '[' or '{'")
+
+    raise ValueError(f"'{filepath}' is an empty file")
 
 
 def update_mongodb_client(mongo_client, ingress_path, filepath):
@@ -467,6 +508,28 @@ def extract_json(filepath):
 
     with filepath.open() as fp:
         return json.load(fp)
+
+
+def extract_json_chunks(filepath):
+    """
+    Generator that yields individual JSON objects from a file.
+
+    This function uses the ijson library to lazily parse a JSON file. The function expects
+    the JSON file to have a list of objects as its root. It yields one object at a time,
+    allowing the processing of large JSON files that do not fit into memory.
+
+    Args:
+        filepath (Path): The path to the JSON file.
+
+    Yields:
+        dict: The next JSON object in the file.
+
+    """
+
+    with filepath.open() as fp:
+        objects = ijson.items(fp, "item")
+        for row in objects:
+            yield row
 
 
 def extract_bin(filepath):

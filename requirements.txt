@@ -1,6 +1,7 @@
 chardet==5.1.0
 clevercsv==0.8.0
 dnspython==2.3.0
+ijson==3.2.*
 numpy==1.25.0
 packaging==23.1
 pandas==2.0.2
