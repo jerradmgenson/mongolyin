@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pymongo
 
-from mongolyin.mongodbclient import MaxRetriesExceeded, MongoDBClient
+from mongolyin.mongodbclient import MongoDBClient
 
 
 class TestMongoDBClient(unittest.TestCase):

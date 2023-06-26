@@ -57,6 +57,7 @@ from mongolyin import etl
 from mongolyin.mongodbclient import MongoDBClient, convert_strings_to_numbers
 
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
+DEFAULT_BUFFER_SIZE = 1000
 DEFAULT_COLLECTION_NAME = "misc"
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".parquet",)
@@ -103,6 +104,15 @@ def main(argv):
     else:
         address = os.environ.get("MONGODB_ADDRESS", DEFAULT_ADDRESS)
 
+    if clargs.buffer_size:
+        buffer_size = clargs.buffer_size
+
+    else:
+        buffer_size = int(os.environ.get("MONGOLYIN_BUFFER_SIZE", DEFAULT_BUFFER_SIZE))
+
+    if buffer_size < 1 and buffer_size != -1:
+        raise ValueError(f"buffer size must be greater than 1 or equal to -1, not '{buffer_size}'")
+
     logger.info("Server address: %s", address)
     mongodb_client_args = (
         address,
@@ -111,6 +121,7 @@ def main(argv):
         auth_db,
         clargs.db,
         clargs.collection,
+        buffer_size,
     )
 
     with MongoDBClient(*mongodb_client_args) as mongo_client:
@@ -171,6 +182,12 @@ def parse_command_line(argv):
         default=2,
         type=float,
         help="Time (in seconds) to sleep in-between checking for file changes.",
+    )
+
+    parser.add_argument(
+        "--buffer-size",
+        type=int,
+        help="Maximum number of documents to read from a file for each insertion.",
     )
 
     return parser.parse_args(args=argv)
