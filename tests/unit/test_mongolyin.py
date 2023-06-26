@@ -12,9 +12,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import os
 import time
 import unittest
-from io import StringIO
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import clevercsv
 import numpy as np
@@ -110,10 +109,20 @@ class TestETLFunctions(unittest.TestCase):
         self.assertEqual(extract, clevercsv.wrappers.stream_dicts)
         self.assertTrue(callable(load))
 
-    def test_select_etl_functions_json(self):
+    @patch("mongolyin.mongolyin.get_json_type")
+    def test_select_etl_functions_json_dict(self, mock_get_json_type):
+        mock_get_json_type.return_value = "dict"
         filepath = TEST_FILEPATH.with_suffix(".json")
         extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client)
         self.assertEqual(extract, mongolyin.extract_json)
+        self.assertTrue(callable(load))
+
+    @patch("mongolyin.mongolyin.get_json_type")
+    def test_select_etl_functions_json_list(self, mock_get_json_type):
+        mock_get_json_type.return_value = "list"
+        filepath = TEST_FILEPATH.with_suffix(".json")
+        extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client)
+        self.assertEqual(extract, mongolyin.extract_json_chunks)
         self.assertTrue(callable(load))
 
     def test_select_etl_functions_bin(self):
