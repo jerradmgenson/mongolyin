@@ -353,8 +353,7 @@ class MongoDBClient:
             retry (int, optional): Number of times to retry in case of failure.
 
         Returns:
-            The ObjectIDs generated for the inserted documents, or None if the
-            insertion fails.
+            The ObjectIDs generated for the inserted documents.
 
         """
 
@@ -389,7 +388,7 @@ class MongoDBClient:
             return insert_result.inserted_ids
 
         logger.info("No new documents to insert from '%s'", filename)
-        return None
+        return []
 
     @disconnect_on_error
     def insert_generator(self, data: Generator, filename: str) -> Optional[List[str]]:

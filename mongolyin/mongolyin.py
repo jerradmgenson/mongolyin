@@ -51,6 +51,7 @@ from queue import Empty, Queue
 import clevercsv
 import ijson
 import pandas as pd
+import psutil
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -60,6 +61,7 @@ from mongolyin.mongodbclient import MongoDBClient, convert_strings_to_numbers
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_BUFFER_SIZE = 1000
 DEFAULT_COLLECTION_NAME = "misc"
+RESTART_SIZE = 157286400  # 150 MB
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".parquet",)
 
@@ -229,6 +231,7 @@ def watch_directory(path, event_handler, process, sleep_time):
     observer = Observer(timeout=sleep_time)
     observer.schedule(event_handler, path, recursive=True)
     logger = logging.getLogger(__name__)
+    proc = psutil.Process(os.getpid())
     try:
         observer.start()
         logger.debug("mongolyin ready")
@@ -237,6 +240,9 @@ def watch_directory(path, event_handler, process, sleep_time):
             new_events = True
             while new_events:
                 new_events = process()
+
+            if proc.memory_info().rss >= RESTART_SIZE:
+                break
 
             time.sleep(sleep_time)
 
