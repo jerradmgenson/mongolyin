@@ -183,7 +183,7 @@ class TestMongoDBClient(unittest.TestCase):
         mock_collection.find.return_value = documents
         result = self.client.insert_document(documents, "test_filename")
         mock_collection.insert_many.assert_not_called()
-        self.assertEqual(result, None)
+        self.assertEqual(result, [])
 
     @patch.object(MongoDBClient, "collection")
     def test_insert_documents_existing_no_match(self, mock_collection):
