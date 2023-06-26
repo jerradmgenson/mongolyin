@@ -18,4 +18,5 @@ docker build -t mongolyin .
 docker run -d --env-file .env --name mongolyin --restart always -v {path_to_watch_dir}:/media/ingest_dir mongolyin
 ```
 Be sure to replace `{path_to_watch_dir}` with the actual directory you want to monitor.
+
 7. Enjoy!
