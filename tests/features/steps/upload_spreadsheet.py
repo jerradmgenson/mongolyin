@@ -82,7 +82,9 @@ def step_impl(context):
 
                     except AssertionError:
                         remote = list(collection.find(record))
-                        import pdb; pdb.set_trace()
+                        import pdb
+
+                        pdb.set_trace()
 
 
 @then("it should upload csv data for the modified file")
