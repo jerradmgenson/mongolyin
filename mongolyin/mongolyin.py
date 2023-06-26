@@ -39,6 +39,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import argparse
 import json
 import logging
+import gc
 import os
 import sys
 import time
@@ -330,6 +331,10 @@ def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
 
             return False
 
+        finally:
+            del pipeline
+            gc.collect()
+
         return True
 
     return event_queue.put, process
@@ -356,6 +361,7 @@ def select_etl_functions(filepath, mongo_client):
 
     elif filepath.suffix == ".csv":
         extract = clevercsv.wrappers.stream_dicts
+        load = partial(mongo_client.insert_generator, filename=filepath.name)
 
     elif filepath.suffix == ".json":
         extract = extract_json

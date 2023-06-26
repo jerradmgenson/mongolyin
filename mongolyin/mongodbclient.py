@@ -12,12 +12,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import copy
 import datetime
 import logging
+import gc
+import sys
 from functools import singledispatchmethod, wraps
 from hashlib import sha256
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Generator
 
 import gridfs
 import pymongo
+
+BUFFER_SIZE = 10485760  # 10 MB
 
 
 def disconnect_on_error(func):
@@ -300,6 +304,24 @@ class MongoDBClient:
 
         logger.info("No new documents to insert from '%s'", filename)
         return None
+
+    @disconnect_on_error
+    @gridfs_fallback
+    def insert_generator(self, data: Generator, filename: str) -> Optional[List[str]]:
+        inserted_ids = []
+        data_buffer = []
+        for d in data:
+            data_buffer.append(d)
+            if sys.getsizeof(data_buffer) >= BUFFER_SIZE:
+                inserted_ids.extend(self.insert_document(data_buffer, filename))
+                data_buffer = []
+                gc.collect()
+
+        if data_buffer:
+            inserted_ids.extend(self.insert_document(data_buffer, filename))
+
+        return inserted_ids
+
 
     @disconnect_on_error
     def insert_file(self, data: bytes, filename: str) -> Optional[str]:
