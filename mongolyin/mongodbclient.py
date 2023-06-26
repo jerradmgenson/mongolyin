@@ -13,16 +13,15 @@ import copy
 import datetime
 import gc
 import logging
-import sys
 from functools import singledispatchmethod, wraps
 from hashlib import sha256
-from typing import Dict, Generator, List, Optional
+from typing import Dict, Generator, List, Optional, Set
 
 import gridfs
 import pandas as pd
 import pymongo
 
-BUFFER_SIZE = 10485760  # 10 MB
+BUFFER_SIZE = 1000
 
 
 def convert_strings_to_numbers(df):
@@ -132,9 +131,9 @@ def gridfs_fallback(func):
     """
 
     @wraps(func)
-    def wrapped_func(self, document, filename):
+    def wrapped_func(self, document, filename, *args, **kwargs):
         try:
-            return func(self, document, filename)
+            return func(self, document, filename, *args, **kwargs)
 
         except pymongo.errors.DocumentTooLarge:
             logger = logging.getLogger(__name__)
@@ -240,7 +239,7 @@ class MongoDBClient:
     @singledispatchmethod
     @disconnect_on_error
     @gridfs_fallback
-    def insert_document(self, document: Dict, filename: str) -> Optional[str]:
+    def insert_document(self, document: Dict, filename: str, existing_hashes=None) -> Optional[str]:
         """
         Insert a single document into the MongoDB collection.
 
@@ -281,7 +280,7 @@ class MongoDBClient:
     @insert_document.register(list)
     @disconnect_on_error
     @gridfs_fallback
-    def _(self, documents: List[Dict], filename: str) -> Optional[List[str]]:
+    def _(self, documents: List[Dict], filename: str, existing_hashes=None) -> Optional[List[str]]:
         """
         Insert multiple documents into the MongoDB collection.
 
@@ -298,16 +297,8 @@ class MongoDBClient:
 
         logger = logging.getLogger(__name__)
         new_documents = []
-        existing_hashes = set()
-
-        # Fetch all documents with that filename and only the metadata field
-        existing_documents = self.collection.find(
-            {"metadata.filename": filename}, {"metadata": 0, "_id": 0}
-        )
-        for doc in existing_documents:
-            with ExceptionLogger((KeyError, TypeError)):
-                document_hash = sha256(str(doc).encode()).hexdigest()
-                existing_hashes.add(document_hash)
+        if not existing_hashes:
+            existing_hashes = self._get_existing_hashes(filename)
 
         # Prepare documents with metadata and check against existing hashes
         for document in documents:
@@ -358,19 +349,20 @@ class MongoDBClient:
 
         inserted_ids = []
         data_buffer = []
+        existing_hashes = self._get_existing_hashes(filename)
         for d in data:
             data_buffer.append(d)
-            if sys.getsizeof(data_buffer) >= BUFFER_SIZE:
-                inserted_ids.extend(self._insert_generator(data_buffer, filename))
+            if len(data_buffer) >= BUFFER_SIZE:
+                inserted_ids.extend(self._insert_generator(data_buffer, filename,  existing_hashes))
                 data_buffer = []
                 gc.collect()
 
         if data_buffer:
-            inserted_ids.extend(self._insert_generator(data_buffer, filename))
+            inserted_ids.extend(self._insert_generator(data_buffer, filename, existing_hashes))
 
         return inserted_ids
 
-    def _insert_generator(self, data, filename):
+    def _insert_generator(self, data, filename, existing_hashes):
         """
         Convert a chunk of generator data to pandas DataFrame, preprocess the data,
         and then insert into the MongoDB collection.
@@ -388,7 +380,21 @@ class MongoDBClient:
         df = pd.DataFrame.from_records(data)
         df = convert_strings_to_numbers(df)
         data = df.to_dict(orient="records")
-        return self.insert_document(data, filename)
+        return self.insert_document(data, filename, existing_hashes=existing_hashes)
+
+    def _get_existing_hashes(self, filename):
+        existing_hashes = set()
+
+        # Fetch all documents with that filename and only the metadata field
+        existing_documents = self.collection.find(
+            {"metadata.filename": filename}, {"metadata": 0, "_id": 0}
+        )
+        for doc in existing_documents:
+            with ExceptionLogger((KeyError, TypeError)):
+                document_hash = sha256(str(doc).encode()).hexdigest()
+                existing_hashes.add(document_hash)
+
+        return existing_hashes
 
     @disconnect_on_error
     def insert_file(self, data: bytes, filename: str) -> Optional[str]:
