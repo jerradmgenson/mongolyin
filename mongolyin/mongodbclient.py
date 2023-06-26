@@ -299,7 +299,7 @@ class MongoDBClient:
     @disconnect_on_error
     @gridfs_fallback
     def insert_document(
-        self, document: Dict, filename: str, existing_documents=None
+        self, document: Dict, filename: str, existing_documents=None, quiet: bool = False
     ) -> Optional[str]:
         """
         Insert a single document into the MongoDB collection.
@@ -307,7 +307,6 @@ class MongoDBClient:
         Args:
             document (dict): The document to be inserted.
             filename (str): Name of the source file.
-            retry (int, optional): Number of times to retry in case of failure.
 
         Returns:
             The ObjectID generated for the inserted document, or None if the
@@ -342,7 +341,7 @@ class MongoDBClient:
     @disconnect_on_error
     @gridfs_fallback
     def _(
-        self, documents: List[Dict], filename: str, existing_documents=None
+        self, documents: List[Dict], filename: str, existing_documents=None, quiet: bool = False
     ) -> Optional[List[str]]:
         """
         Insert multiple documents into the MongoDB collection.
@@ -350,7 +349,6 @@ class MongoDBClient:
         Args:
             documents (list): A list of documents to be inserted.
             filename (str): The filename associated with the documents.
-            retry (int, optional): Number of times to retry in case of failure.
 
         Returns:
             The ObjectIDs generated for the inserted documents.
@@ -378,16 +376,19 @@ class MongoDBClient:
 
         if new_documents:
             insert_result = self.collection.insert_many(new_documents)
-            logger.info(
-                "%d new documents inserted into database from '%s'",
-                len(new_documents),
-                filename,
-            )
+            if not quiet:
+                logger.info(
+                    "%d new documents inserted into database from '%s'",
+                    len(new_documents),
+                    filename,
+                )
 
             logger.debug("'%s' inserted into database", filename)
             return insert_result.inserted_ids
 
-        logger.info("No new documents to insert from '%s'", filename)
+        if not quiet:
+            logger.info("No new documents to insert from '%s'", filename)
+
         return []
 
     @disconnect_on_error
@@ -423,6 +424,12 @@ class MongoDBClient:
         if data_buffer:
             inserted_ids.extend(self._insert_generator(data_buffer, filename, existing_documents))
 
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "%d new documents inserted into database from '%s'",
+            len(inserted_ids),
+            filename,
+        )
         return inserted_ids
 
     def _insert_generator(self, data, filename, existing_documents):
@@ -442,7 +449,9 @@ class MongoDBClient:
 
         data = [dict(d) for d in data]
         data = convert_strings_to_numbers(data)
-        return self.insert_document(data, filename, existing_documents=existing_documents)
+        return self.insert_document(
+            data, filename, existing_documents=existing_documents, quiet=True
+        )
 
     def _get_existing_documents(self, filename: str):
         """
