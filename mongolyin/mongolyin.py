@@ -37,6 +37,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 
 import argparse
+import gc
 import json
 import logging
 import os
@@ -53,12 +54,12 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from mongolyin import etl
-from mongolyin.mongodbclient import MongoDBClient
+from mongolyin.mongodbclient import MongoDBClient, convert_strings_to_numbers
 
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_COLLECTION_NAME = "misc"
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
-PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".csv", ".parquet")
+PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".parquet",)
 
 
 def main(argv):
@@ -330,6 +331,10 @@ def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
 
             return False
 
+        finally:
+            del pipeline
+            gc.collect()
+
         return True
 
     return event_queue.put, process
@@ -353,6 +358,10 @@ def select_etl_functions(filepath, mongo_client):
     if filepath.suffix in PANDAS_EXTENSIONS:
         extract = extract_pandas
         load = partial(mongo_client.insert_document, filename=filepath.name)
+
+    elif filepath.suffix == ".csv":
+        extract = clevercsv.wrappers.stream_dicts
+        load = partial(mongo_client.insert_generator, filename=filepath.name)
 
     elif filepath.suffix == ".json":
         extract = extract_json
@@ -413,10 +422,7 @@ def extract_pandas(filepath):
 
     """
 
-    if filepath.suffix == ".csv":
-        df = clevercsv.wrappers.read_dataframe(filepath)
-
-    elif filepath.suffix == ".parquet":
+    if filepath.suffix == ".parquet":
         df = pd.read_parquet(filepath)
 
     elif filepath.suffix in SPREADSHEET_EXTENSIONS:
@@ -428,38 +434,6 @@ def extract_pandas(filepath):
     df = convert_strings_to_numbers(df)
 
     return df.to_dict(orient="records")
-
-
-def convert_strings_to_numbers(df):
-    """
-    Converts string columns to numeric where possible in a DataFrame.
-
-    This function iterates over each column in a DataFrame. If the column
-    type is 'object' (Pandas' internal type for string), it tries to convert
-    the column to a numeric type. If any value in the column cannot be
-    converted to a numeric type, the function leaves the column as strings.
-    In addition, it replaces commas with periods before attempting the
-    conversion.
-
-    Args:
-        df (pd.DataFrame): The DataFrame whose string columns are to be
-                           converted to numeric where possible.
-
-    Returns:
-        pd.DataFrame: The DataFrame with string columns converted to numeric
-                      where possible.
-
-    """
-
-    for col in df.columns:
-        if df[col].dtype == "object":  # if the column is a string
-            try:
-                # Replace commas with periods and attempt conversion to numeric
-                df[col] = pd.to_numeric(df[col].str.replace(",", "."), errors="raise")
-
-            except ValueError:
-                pass  # If any value raises a ValueError when converting, leave the column as strings
-    return df
 
 
 def extract_json(filepath):

@@ -11,13 +11,50 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import copy
 import datetime
+import gc
 import logging
+import sys
 from functools import singledispatchmethod, wraps
 from hashlib import sha256
-from typing import Dict, List, Optional
+from typing import Dict, Generator, List, Optional
 
 import gridfs
+import pandas as pd
 import pymongo
+
+BUFFER_SIZE = 10485760  # 10 MB
+
+
+def convert_strings_to_numbers(df):
+    """
+    Converts string columns to numeric where possible in a DataFrame.
+
+    This function iterates over each column in a DataFrame. If the column
+    type is 'object' (Pandas' internal type for string), it tries to convert
+    the column to a numeric type. If any value in the column cannot be
+    converted to a numeric type, the function leaves the column as strings.
+    In addition, it replaces commas with periods before attempting the
+    conversion.
+
+    Args:
+        df (pd.DataFrame): The DataFrame whose string columns are to be
+                           converted to numeric where possible.
+
+    Returns:
+        pd.DataFrame: The DataFrame with string columns converted to numeric
+                      where possible.
+
+    """
+
+    for col in df.columns:
+        if df[col].dtype == "object":  # if the column is a string
+            try:
+                # Replace commas with periods and attempt conversion to numeric
+                df[col] = pd.to_numeric(df[col].str.replace(",", "."), errors="raise")
+
+            except ValueError:
+                pass  # If any value raises a ValueError when converting, leave the column as strings
+    return df
 
 
 def disconnect_on_error(func):
@@ -300,6 +337,58 @@ class MongoDBClient:
 
         logger.info("No new documents to insert from '%s'", filename)
         return None
+
+    @disconnect_on_error
+    def insert_generator(self, data: Generator, filename: str) -> Optional[List[str]]:
+        """
+        Insert documents from a generator object into the MongoDB collection.
+
+        The method chunks the generator data based on the set buffer size
+        and then passes these chunks for insertion.
+
+        Args:
+            data (Generator): A generator object that yields the documents to be inserted.
+            filename (str): The filename associated with the documents.
+
+        Returns:
+            A list of ObjectIDs generated for the inserted documents, or None if the
+            insertion fails.
+
+        """
+
+        inserted_ids = []
+        data_buffer = []
+        for d in data:
+            data_buffer.append(d)
+            if sys.getsizeof(data_buffer) >= BUFFER_SIZE:
+                inserted_ids.extend(self._insert_generator(data_buffer, filename))
+                data_buffer = []
+                gc.collect()
+
+        if data_buffer:
+            inserted_ids.extend(self._insert_generator(data_buffer, filename))
+
+        return inserted_ids
+
+    def _insert_generator(self, data, filename):
+        """
+        Convert a chunk of generator data to pandas DataFrame, preprocess the data,
+        and then insert into the MongoDB collection.
+
+        Args:
+            data (list): A list of documents to be inserted.
+            filename (str): The filename associated with the documents.
+
+        Returns:
+            A list of ObjectIDs generated for the inserted documents, or None if the
+            insertion fails.
+
+        """
+
+        df = pd.DataFrame.from_records(data)
+        df = convert_strings_to_numbers(df)
+        data = df.to_dict(orient="records")
+        return self.insert_document(data, filename)
 
     @disconnect_on_error
     def insert_file(self, data: bytes, filename: str) -> Optional[str]:

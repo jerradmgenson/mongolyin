@@ -16,6 +16,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+import clevercsv
 import numpy as np
 import pandas as pd
 
@@ -106,7 +107,7 @@ class TestETLFunctions(unittest.TestCase):
 
     def test_select_etl_functions_pandas(self):
         extract, load = mongolyin.select_etl_functions(TEST_FILEPATH, self.mongo_client)
-        self.assertEqual(extract, mongolyin.extract_pandas)
+        self.assertEqual(extract, clevercsv.wrappers.stream_dicts)
         self.assertTrue(callable(load))
 
     def test_select_etl_functions_json(self):
