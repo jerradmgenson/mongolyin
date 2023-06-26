@@ -333,7 +333,14 @@ def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
         if new_client is None:
             return True
 
-        extract, load = select_etl_functions(filepath, new_client)
+        try:
+            extract, load = select_etl_functions(filepath, new_client)
+
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.exception(e)
+            return True
+
         pipeline = etl.Pipeline(
             etl.Stage("file ready check", file_ready_check),
             etl.Stage("extract", extract),
