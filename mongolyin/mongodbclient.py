@@ -359,10 +359,8 @@ class MongoDBClient:
             existing_documents = self._get_existing_documents(filename)
 
         # Prepare documents with metadata and check against existing hashes
-        print("Sorted pending documents:", file=sys.stderr)
         for document in documents:
             sorted_items = str(sorted(list(document.items())))
-            print(sorted_items, file=sys.stderr)
             if sorted_items in existing_documents:
                 logger.info("Document already exists in database, skipping")
                 continue
@@ -376,10 +374,6 @@ class MongoDBClient:
 
         if new_documents:
             insert_result = self.collection.insert_many(new_documents)
-            print(f"inserted:", file=sys.stderr)
-            for doc in new_documents:
-                print(doc, file=sys.stderr)
-
             logger.info(
                 "%d new documents inserted into database from '%s'",
                 len(new_documents),
@@ -444,19 +438,30 @@ class MongoDBClient:
         data = convert_strings_to_numbers(data)
         return self.insert_document(data, filename, existing_documents=existing_documents)
 
-    def _get_existing_documents(self, filename):
+    def _get_existing_documents(self, filename: str):
+        """
+        Fetches and returns a set of existing documents with a given
+        filename in the MongoDB collection.
+
+        Args:
+            filename (str): The filename to look for in the 'metadata.filename' field.
+
+        Returns:
+            set: A set of existing documents in string format with the
+                 given filename. Each document in the set is a string
+                 representation of sorted list of items in the document.
+
+        """
+
         existing_documents = set()
 
-        with ExceptionLogger((KeyError, TypeError)):
-            # Fetch all documents with that filename and only the metadata field
-            query_results = self.collection.find(
-                {"metadata.filename": filename}, {"metadata": 0, "_id": 0}
-            )
+        # Fetch all documents with that filename and only the metadata field
+        query_results = self.collection.find(
+            {"metadata.filename": filename}, {"metadata": 0, "_id": 0}
+        )
 
-        print("Sorted query results:", file=sys.stderr)
         for doc in query_results:
             sorted_items = str(sorted(list(doc.items())))
-            print(sorted_items, file=sys.stderr)
             existing_documents.add(sorted_items)
 
         return existing_documents
@@ -560,10 +565,3 @@ class ExceptionLogger:
                 return True  # suppress specified exceptions and continue execution
 
         return False  # do not suppress other exceptions
-
-
-class MaxRetriesExceeded(Exception):
-    """
-    Raised when the maximum number of retries is exceeded.
-
-    """
