@@ -61,7 +61,7 @@ class Pipeline:
         logger = logging.getLogger(__name__)
         for stage in self.stages:
             try:
-                logger.info("Running stage '%s'...", stage.name)
+                logger.debug("Running stage '%s'...", stage.name)
                 data = stage.operation(data)
 
             except Exception as e:
