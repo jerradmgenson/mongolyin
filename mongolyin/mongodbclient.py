@@ -357,14 +357,14 @@ class MongoDBClient:
 
         logger = logging.getLogger(__name__)
         new_documents = []
-        if not existing_documents:
+        if existing_documents is None:
             existing_documents = self._get_existing_documents(filename)
 
         # Prepare documents with metadata and check against existing hashes
         for document in documents:
             sorted_items = str(sorted(list(document.items())))
             if sorted_items in existing_documents:
-                logger.info("Document already exists in database, skipping")
+                logger.debug("Document already exists in database, skipping")
                 continue
 
             if "metadata" not in document:
