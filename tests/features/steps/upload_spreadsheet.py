@@ -76,15 +76,20 @@ def step_impl(context):
                 else:
                     df = pd.read_excel(filepath)
 
+                for col in df.columns:
+                    if df[col].dtype == "object":
+                        try:
+                            df[col] = pd.to_numeric(df[col], errors="raise")
+
+                        except ValueError:
+                            pass
+
                 for record in df.to_dict(orient="records"):
-                    try:
-                        assert len(list(collection.find(record))) == 1
+                    for key, value in record.items():
+                        if pd.isnull(value):
+                            record[key] = None
 
-                    except AssertionError:
-                        remote = list(collection.find(record))
-                        import pdb
-
-                        pdb.set_trace()
+                    assert len(list(collection.find(record))) == 1
 
 
 @then("it should upload csv data for the modified file")

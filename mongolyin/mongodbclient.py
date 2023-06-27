@@ -133,7 +133,7 @@ def convert_dict_strings_to_numbers(docs: List[dict]):
     for doc in docs:
         for col, convert in convert_columns.items():
             # Convert missing values to None.
-            if doc[col].strip() in MISSING_VALUES:
+            if doc[col].lower().strip() in MISSING_VALUES:
                 doc[col] = None
 
             # If the value is not a missing value, convert it to the appropriate
