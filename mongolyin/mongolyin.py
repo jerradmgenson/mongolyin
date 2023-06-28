@@ -44,9 +44,10 @@ import os
 import sys
 import time
 from collections import deque
-from functools import partial
+from functools import partial, singledispatch, wraps
 from pathlib import Path
 from queue import Empty, Queue
+from typing import Dict, List
 
 import clevercsv
 import ijson
@@ -56,11 +57,29 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from mongolyin import etl
-from mongolyin.mongodbclient import MongoDBClient, convert_strings_to_numbers
+from mongolyin.mongodbclient import MongoDBClient
 
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
-DEFAULT_BUFFER_SIZE = 1000
+DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_COLLECTION_NAME = "misc"
+MISSING_VALUES = {
+    "",
+    "-nan",
+    "nan",
+    "n/a",
+    "null",
+    "1.#ind",
+    "#n/a n/a",
+    "-1.#qnan",
+    "#n/a",
+    "1.#qnan",
+    "-1.#ind",
+    "#na",
+    "na",
+    "none",
+    "missing",
+}
+
 RESTART_SIZE = 157286400  # 150 MB
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".parquet",)
@@ -107,14 +126,14 @@ def main(argv):
     else:
         address = os.environ.get("MONGODB_ADDRESS", DEFAULT_ADDRESS)
 
-    if clargs.buffer_size:
-        buffer_size = clargs.buffer_size
+    if clargs.chunk_size:
+        chunk_size = clargs.chunk_size
 
     else:
-        buffer_size = int(os.environ.get("MONGOLYIN_BUFFER_SIZE", DEFAULT_BUFFER_SIZE))
+        chunk_size = int(os.environ.get("MONGOLYIN_CHUNK_SIZE", DEFAULT_CHUNK_SIZE))
 
-    if buffer_size < 1 and buffer_size != -1:
-        raise ValueError(f"buffer size must be greater than 1 or equal to -1, not '{buffer_size}'")
+    if chunk_size < 1 and chunk_size != -1:
+        raise ValueError(f"buffer size must be greater than 1 or equal to -1, not '{chunk_size}'")
 
     logger.info("Server address: %s", address)
     mongodb_client_args = (
@@ -124,11 +143,10 @@ def main(argv):
         auth_db,
         clargs.db,
         clargs.collection,
-        buffer_size,
     )
 
     with MongoDBClient(*mongodb_client_args) as mongo_client:
-        dispatch, process = create_dispatch(mongo_client, clargs.ingress_path)
+        dispatch, process = create_dispatch(mongo_client, clargs.ingress_path, chunk_size)
         event_handler = FileChangeHandler(dispatch)
         watch_directory(clargs.ingress_path, event_handler, process, clargs.sleep_time)
 
@@ -188,7 +206,7 @@ def parse_command_line(argv):
     )
 
     parser.add_argument(
-        "--buffer-size",
+        "--chunk-size",
         type=int,
         help="Maximum number of documents to read from a file for each insertion.",
     )
@@ -254,7 +272,7 @@ def watch_directory(path, event_handler, process, sleep_time):
         observer.join()
 
 
-def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
+def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
     """
     Creates a dispatch function which handles the ingestion of different
     file types.
@@ -264,6 +282,8 @@ def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
                                       perform database operations.
         ingress_path (str): The base directory which files are being
                             ingested from.
+        chunk_size (int): Number of records to extract per chunk for file types
+                           that support chunked extraction.
         debounce_time (float, optional): Number of seconds that must pass after
                                          the last event arrives before we begin
                                          processing events.
@@ -340,7 +360,7 @@ def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
             return True
 
         try:
-            extract, load = select_etl_functions(filepath, new_client)
+            extract, load = select_etl_functions(filepath, new_client, chunk_size)
 
         except Exception as e:
             logger = logging.getLogger(__name__)
@@ -371,7 +391,7 @@ def create_dispatch(mongo_client, ingress_path, debounce_time=0.1):
     return event_queue.put, process
 
 
-def select_etl_functions(filepath, mongo_client):
+def select_etl_functions(filepath, mongo_client, chunk_size):
     """
     Selects appropriate extraction and loading functions based on the
     file type.
@@ -380,6 +400,8 @@ def select_etl_functions(filepath, mongo_client):
         filepath (Path): Path to the file.
         mongo_client (MongoDBClient): An instance of MongoDBClient to
                                       perform database operations.
+        chunk_size (int): Number of records to extract per chunk for file types
+                           that support chunked extraction.
 
     Returns:
         extract (func), load (func): The extraction and load functions
@@ -391,7 +413,7 @@ def select_etl_functions(filepath, mongo_client):
         load = partial(mongo_client.insert_document, filename=filepath.name)
 
     elif filepath.suffix == ".csv":
-        extract = clevercsv.wrappers.stream_dicts
+        extract = partial(extract_csv_chunks, chunk_size=chunk_size)
         load = partial(mongo_client.insert_generator, filename=filepath.name)
 
     elif filepath.suffix == ".json":
@@ -400,7 +422,7 @@ def select_etl_functions(filepath, mongo_client):
             load = partial(mongo_client.insert_document, filename=filepath.name)
 
         else:
-            extract = extract_json_chunks
+            extract = partial(extract_json_chunks, chunk_size=chunk_size)
             load = partial(mongo_client.insert_generator, filename=filepath.name)
 
     else:
@@ -529,19 +551,263 @@ def extract_json(filepath):
         return json.load(fp)
 
 
+def convert_strings_to_numbers(docs: List[dict]):
+    """
+    Convert columns of string values in a list of dictionaries to numbers if possible.
+
+    Args:
+      docs: list of dict
+        The list of dictionaries to be converted. Each dictionary represents a row of data,
+        and each key-value pair in the dictionary corresponds to a column and its value in that row.
+
+    Returns:
+      list of dict
+        The converted list of dictionaries. Dictionaries are directly modified in the input list.
+
+    """
+
+    # Identify columns that we can convert to numeric values.
+    # Initialize all column names with None conversion function.
+    convert_columns = {c: 0 for c in docs[0]}
+
+    # Define the conversions in the order they should be attempted.
+    conversions = [convert_bool, int, float]
+
+    for doc in docs:
+        for col in convert_columns.copy():
+            val = doc[col]
+            if val is None or col not in convert_columns:
+                continue
+
+            # Delete non-string columns from convert_columns.
+            if not isinstance(val, str):
+                del convert_columns[col]
+                continue
+
+            val = val.strip().lower().replace(",", ".")
+
+            # Convert missing values to None.
+            if val in MISSING_VALUES:
+                doc[col] = None
+                continue
+
+            success = False
+            for i, conversion in enumerate(conversions):
+                if i < convert_columns[col]:
+                    continue
+
+                try:
+                    # Try to convert the value. If successful, set the conversion for this column.
+                    conversion(val)
+                    convert_columns[col] = i
+                    success = True
+                    # Break the inner loop as soon as a successful conversion is found.
+                    break
+
+                except ValueError:
+                    continue
+
+                except TypeError:
+                    continue
+
+            if not success:
+                # If no successful conversion was found, remove the column.
+                del convert_columns[col]
+
+    # Convert function ids to functions.
+    convert_columns = {c: conversions[i] for c, i in convert_columns.items()}
+
+    # At this point, convert_columns contains only the columns that can be
+    # converted to int or float.
+    # Now, actually convert the string columns to numeric columns based on the
+    # conversion function determined in the previous step.
+    for doc in docs:
+        for col, convert in convert_columns.items():
+            if doc[col] is not None:
+                doc[col] = convert(doc[col].replace(",", "."))
+
+    return docs
+
+
+@singledispatch
+def convert_bool(val):
+    """
+    Converts a value to a boolean.
+
+    This function is a dispatcher and its functionality depends on the type of `val`.
+    By default, it raises a TypeError. The actual implementations are provided by
+    the registered implementations for specific types.
+
+    Args:
+        val: The value to be converted to a boolean.
+
+    Raises:
+        TypeError: If no implementation for the type of `val` exists.
+
+    """
+
+    raise TypeError(f"type '{type(val)}' can't be converted to type 'bool'")
+
+
+@convert_bool.register
+def convert_bool_from_bool(boolean: bool):
+    """
+    Converts a boolean to a boolean (i.e., a no-op).
+
+    This function is useful in the single dispatch setup, where we need to have
+    a specific function for each type that we expect to handle.
+
+    Args:
+        boolean (bool): The boolean to be converted to a boolean.
+
+    Returns:
+        bool: The same boolean value.
+
+    """
+    return boolean
+
+
+@convert_bool.register
+def convert_bool_from_string(string: str):
+    """
+    Converts a string to a boolean.
+
+    If the string is 'true' (case-insensitive), it returns True.
+    If the string is 'false' (case-insensitive), it returns False.
+    If the string represents an integer, it converts the string to an integer and
+    tries to convert that integer to a boolean.
+
+    Args:
+        string (str): The string to be converted to a boolean.
+
+    Returns:
+        bool: The converted boolean value.
+
+    Raises:
+        ValueError: If the string cannot be converted to a boolean.
+
+    """
+
+    string = string.strip().lower()
+    if string == "true":
+        return True
+
+    if string == "false":
+        return False
+
+    return convert_bool(int(string))
+
+
+@convert_bool.register
+def convert_bool_from_int(integer: int):
+    """
+    Converts an integer to a boolean.
+
+    If the integer is 1, it returns True.
+    If the integer is 0, it returns False.
+
+    Args:
+        integer (int): The integer to be converted to a boolean.
+
+    Returns:
+        bool: The converted boolean value.
+
+    Raises:
+        ValueError: If the integer is not 0 or 1.
+
+    """
+
+    if integer == 1:
+        return True
+
+    if integer == 0:
+        return False
+
+    raise ValueError(f"Can not convert '{integer}' to type 'bool'")
+
+
+def autotyping(func):
+    """
+    Decorator that modifies a generator to convert strings to numbers
+    where possible.
+
+    This decorator modifies a generator function to convert dicts of
+    string values to boolean, integer, or float values where possible
+    in the data it yields. It can be applied to any generator that yields
+    iterable data.
+
+    Args:
+        func (generator function): The generator function to modify.
+
+    Returns:
+        function: The decorated generator function.
+
+    """
+
+    @wraps(func)
+    def wrapped_func(*args, **kwargs):
+        return (convert_strings_to_numbers(d) for d in func(*args, **kwargs))
+
+    return wrapped_func
+
+
+def chunking(func):
+    """
+    Decorator that modifies a generator to yield data in chunks.
+
+    This decorator modifies a generator function to yield its data in chunks
+    of a specified size, instead of one item at a time. It can be applied to
+    any generator that yields iterable data.
+
+    If the chunk size is set to 1, data is yielded as it is generated. If the
+    chunk size is set to -1, all data is yielded in one large chunk.
+
+    Args:
+        func (generator function): The generator function to modify.
+
+    Returns:
+        function: The decorated generator function.
+
+    """
+
+    @wraps(func)
+    def chunky_func(*args, chunk_size=DEFAULT_CHUNK_SIZE, **kwargs):
+        data_buffer = []
+        for data in func(*args, **kwargs):
+            data_buffer.append(data)
+            if len(data_buffer) >= chunk_size and chunk_size != -1:
+                yield data_buffer
+                data_buffer = []
+                gc.collect()
+
+        if data_buffer:
+            yield data_buffer
+
+    return chunky_func
+
+
+@autotyping
+@chunking
 def extract_json_chunks(filepath):
     """
-    Generator that yields individual JSON objects from a file.
+    Generator function that yields chunks of JSON objects from a file.
 
-    This function uses the ijson library to lazily parse a JSON file. The function expects
-    the JSON file to have a list of objects as its root. It yields one object at a time,
-    allowing the processing of large JSON files that do not fit into memory.
+    This function uses the ijson library to lazily parse a JSON file. The
+    function expects the JSON file to have a list of dicts as its root. It
+    yields chunks of objects at a time, allowing the processing of large JSON
+    files that do not fit into memory.
+
+    This function is decorated with `@autotyping` and `@chunking`, so
+    it must be called with a chunk size. The `@autotyping` decorator converts
+    string values to boolean, integer, or float values where possible, and
+    `@chunking` controls the chunk size.
 
     Args:
         filepath (Path): The path to the JSON file.
 
     Yields:
-        dict: The next JSON object in the file.
+        list: The next chunk of JSON objects in the file, with string values
+              converted to numbers where possible.
 
     """
 
@@ -549,6 +815,30 @@ def extract_json_chunks(filepath):
         objects = ijson.items(fp, "item")
         for row in objects:
             yield row
+
+
+extract_csv_chunks = autotyping(chunking(clevercsv.wrappers.stream_dicts))
+extract_csv_chunks.__doc__ = """
+Function that yields chunks of CSV rows from a file.
+
+This function uses the CleverCSV library to lazily parse a CSV file. It yields
+chunks of rows (as record dicts) at a time, allowing the processing of large CSV
+files that do not fit into memory.
+
+This function is decorated with `@autotyping` and `@chunking`, so
+it must be called with a chunk size. The `@autotyping` decorator converts
+string values to boolean, integer, or float values where possible, and
+`@chunking` controls the chunk size.
+
+
+Args:
+    path (str): The path to the CSV file.
+    chunk_size (int): The size of the chunks to yield.
+
+Yields:
+    list: The next chunk of records in the file, with string values converted
+          to numbers where possible.
+"""
 
 
 def extract_bin(filepath):

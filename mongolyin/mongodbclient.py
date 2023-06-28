@@ -13,206 +13,13 @@ import copy
 import datetime
 import gc
 import logging
-from functools import singledispatch, singledispatchmethod, wraps
+from functools import singledispatchmethod, wraps
 from hashlib import sha256
 from typing import Dict, Generator, List, Optional
 
 import gridfs
 import pandas as pd
 import pymongo
-
-MISSING_VALUES = {
-    "",
-    "-nan",
-    "nan",
-    "n/a",
-    "null",
-    "1.#ind",
-    "#n/a n/a",
-    "-1.#qnan",
-    "#n/a",
-    "1.#qnan",
-    "-1.#ind",
-    "#na",
-    "na",
-    "none",
-    "missing",
-}
-
-
-def convert_strings_to_numbers(docs: List[dict]):
-    """
-    Convert columns of string values in a list of dictionaries to numbers if possible.
-
-    Args:
-      docs: list of dict
-        The list of dictionaries to be converted. Each dictionary represents a row of data,
-        and each key-value pair in the dictionary corresponds to a column and its value in that row.
-
-    Returns:
-      list of dict
-        The converted list of dictionaries. Dictionaries are directly modified in the input list.
-
-    """
-
-    # Identify columns that we can convert to numeric values.
-    # Initialize all column names with None conversion function.
-    convert_columns = {c: 0 for c in docs[0]}
-
-    # Define the conversions in the order they should be attempted.
-    conversions = [convert_bool, int, float]
-
-    for doc in docs:
-        for col in convert_columns.copy():
-            val = doc[col]
-            if val is None or col not in convert_columns:
-                continue
-
-            # Delete non-string columns from convert_columns.
-            if not isinstance(val, str):
-                del convert_columns[col]
-                continue
-
-            val = val.strip().lower().replace(",", ".")
-
-            # Convert missing values to None.
-            if val in MISSING_VALUES:
-                doc[col] = None
-                continue
-
-            success = False
-            for i, conversion in enumerate(conversions):
-                if i < convert_columns[col]:
-                    continue
-
-                try:
-                    # Try to convert the value. If successful, set the conversion for this column.
-                    conversion(val)
-                    convert_columns[col] = i
-                    success = True
-                    # Break the inner loop as soon as a successful conversion is found.
-                    break
-
-                except ValueError:
-                    continue
-
-                except TypeError:
-                    continue
-
-            if not success:
-                # If no successful conversion was found, remove the column.
-                del convert_columns[col]
-
-    # Convert function ids to functions.
-    convert_columns = {c: conversions[i] for c, i in convert_columns.items()}
-
-    # At this point, convert_columns contains only the columns that can be
-    # converted to int or float.
-    # Now, actually convert the string columns to numeric columns based on the
-    # conversion function determined in the previous step.
-    for doc in docs:
-        for col, convert in convert_columns.items():
-            if doc[col] is not None:
-                doc[col] = convert(doc[col].replace(",", "."))
-
-    return docs
-
-
-@singledispatch
-def convert_bool(val):
-    """
-    Converts a value to a boolean.
-
-    This function is a dispatcher and its functionality depends on the type of `val`.
-    By default, it raises a TypeError. The actual implementations are provided by
-    the registered implementations for specific types.
-
-    Args:
-        val: The value to be converted to a boolean.
-
-    Raises:
-        TypeError: If no implementation for the type of `val` exists.
-
-    """
-
-    raise TypeError(f"type '{type(val)}' can't be converted to type 'bool'")
-
-
-@convert_bool.register
-def convert_bool_from_bool(boolean: bool):
-    """
-    Converts a boolean to a boolean (i.e., a no-op).
-
-    This function is useful in the single dispatch setup, where we need to have
-    a specific function for each type that we expect to handle.
-
-    Args:
-        boolean (bool): The boolean to be converted to a boolean.
-
-    Returns:
-        bool: The same boolean value.
-
-    """
-    return boolean
-
-
-@convert_bool.register
-def convert_bool_from_string(string: str):
-    """
-    Converts a string to a boolean.
-
-    If the string is 'true' (case-insensitive), it returns True.
-    If the string is 'false' (case-insensitive), it returns False.
-    If the string represents an integer, it converts the string to an integer and
-    tries to convert that integer to a boolean.
-
-    Args:
-        string (str): The string to be converted to a boolean.
-
-    Returns:
-        bool: The converted boolean value.
-
-    Raises:
-        ValueError: If the string cannot be converted to a boolean.
-
-    """
-
-    string = string.strip().lower()
-    if string == "true":
-        return True
-
-    if string == "false":
-        return False
-
-    return convert_bool(int(string))
-
-
-@convert_bool.register
-def convert_bool_from_int(integer: int):
-    """
-    Converts an integer to a boolean.
-
-    If the integer is 1, it returns True.
-    If the integer is 0, it returns False.
-
-    Args:
-        integer (int): The integer to be converted to a boolean.
-
-    Returns:
-        bool: The converted boolean value.
-
-    Raises:
-        ValueError: If the integer is not 0 or 1.
-
-    """
-
-    if integer == 1:
-        return True
-
-    if integer == 0:
-        return False
-
-    raise ValueError(f"Can not convert '{integer}' to type 'bool'")
 
 
 def disconnect_on_error(func):
@@ -329,7 +136,6 @@ class MongoDBClient:
         auth_db: str,
         db: str,
         collection: str,
-        buffer_size: int = -1,
         client: pymongo.MongoClient = None,
     ):
         self._address = address
@@ -338,7 +144,6 @@ class MongoDBClient:
         self._auth_db = auth_db
         self._db_name = db
         self._collection_name = collection
-        self._buffer_size = buffer_size
         self._client = client
 
     def __enter__(self):
@@ -514,19 +319,13 @@ class MongoDBClient:
         """
 
         inserted_ids = []
-        data_buffer = []
         existing_documents = self._get_existing_documents(filename)
-        for d in data:
-            data_buffer.append(d)
-            if self._buffer_size != -1 and len(data_buffer) >= self._buffer_size:
-                inserted_ids.extend(
-                    self._insert_generator(data_buffer, filename, existing_documents)
+        for chunk in data:
+            inserted_ids.extend(
+                self.insert_document(
+                    chunk, filename, existing_documents=existing_documents, quiet=True
                 )
-                data_buffer = []
-                gc.collect()
-
-        if data_buffer:
-            inserted_ids.extend(self._insert_generator(data_buffer, filename, existing_documents))
+            )
 
         logger = logging.getLogger(__name__)
         logger.info(
@@ -535,27 +334,6 @@ class MongoDBClient:
             filename,
         )
         return inserted_ids
-
-    def _insert_generator(self, data, filename, existing_documents):
-        """
-        Convert a chunk of generator data to pandas DataFrame, preprocess the data,
-        and then insert into the MongoDB collection.
-
-        Args:
-            data (list): A list of documents to be inserted.
-            filename (str): The filename associated with the documents.
-
-        Returns:
-            A list of ObjectIDs generated for the inserted documents, or None if the
-            insertion fails.
-
-        """
-
-        data = [dict(d) for d in data]
-        data = convert_strings_to_numbers(data)
-        return self.insert_document(
-            data, filename, existing_documents=existing_documents, quiet=True
-        )
 
     def _get_existing_documents(self, filename: str):
         """

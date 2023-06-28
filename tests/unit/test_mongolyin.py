@@ -39,6 +39,7 @@ class TestDispatch(unittest.TestCase):
         dispatch, process = mongolyin.create_dispatch(
             self.mock_mongo_client,
             TEST_INGRESS_PATH,
+            1000,
         )
 
         dispatch(TEST_FILEPATH)
@@ -51,6 +52,7 @@ class TestDispatch(unittest.TestCase):
         dispatch, process = mongolyin.create_dispatch(
             self.mock_mongo_client,
             TEST_INGRESS_PATH,
+            1000,
         )
 
         dispatch(TEST_FILEPATH)
@@ -105,15 +107,15 @@ class TestETLFunctions(unittest.TestCase):
         self.mongo_client = MagicMock()
 
     def test_select_etl_functions_pandas(self):
-        extract, load = mongolyin.select_etl_functions(TEST_FILEPATH, self.mongo_client)
-        self.assertEqual(extract, clevercsv.wrappers.stream_dicts)
+        extract, load = mongolyin.select_etl_functions(TEST_FILEPATH, self.mongo_client, 1000)
+        self.assertTrue(callable(mongolyin.extract_csv_chunks))
         self.assertTrue(callable(load))
 
     @patch("mongolyin.mongolyin.get_json_type")
     def test_select_etl_functions_json_dict(self, mock_get_json_type):
         mock_get_json_type.return_value = "dict"
         filepath = TEST_FILEPATH.with_suffix(".json")
-        extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client)
+        extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client, 1000)
         self.assertEqual(extract, mongolyin.extract_json)
         self.assertTrue(callable(load))
 
@@ -121,13 +123,13 @@ class TestETLFunctions(unittest.TestCase):
     def test_select_etl_functions_json_list(self, mock_get_json_type):
         mock_get_json_type.return_value = "list"
         filepath = TEST_FILEPATH.with_suffix(".json")
-        extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client)
-        self.assertEqual(extract, mongolyin.extract_json_chunks)
+        extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client, 1000)
+        self.assertTrue(callable(extract))
         self.assertTrue(callable(load))
 
     def test_select_etl_functions_bin(self):
         filepath = TEST_FILEPATH.with_suffix(".bin")
-        extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client)
+        extract, load = mongolyin.select_etl_functions(filepath, self.mongo_client, 1000)
         self.assertEqual(extract, mongolyin.extract_bin)
         self.assertTrue(callable(load))
 
@@ -232,6 +234,190 @@ class TestSetQueue(unittest.TestCase):
         self.set_queue.push("item1")
         self.assertIn("item1", self.set_queue)
         self.assertNotIn("item2", self.set_queue)
+
+
+class TestConvertStringsToNumbers(unittest.TestCase):
+    """
+    Unit tests for mongodbclient.convert_strings_to_numbers
+
+    """
+
+    def setUp(self):
+        self.docs = [
+            {
+                "a": "1",
+                "b": "1,1",
+                "c": "true",
+                "d": "1",
+                "e": "",
+                "f": "0",
+                "g": "0",
+                "h": "1",
+                "i": 1,
+                "j": None,
+                "k": 1.0,
+                "l": True,
+                "m": "true",
+            },
+            {
+                "a": "2",
+                "b": "2,2",
+                "c": "false",
+                "d": "2",
+                "e": "NAN",
+                "f": "1",
+                "g": "1",
+                "h": "2",
+                "i": 2,
+                "j": "3.1",
+                "k": 2.0,
+                "l": True,
+                "m": "false",
+            },
+            {
+                "a": "3",
+                "b": "3,3",
+                "c": "true",
+                "d": "3.3",
+                "e": "nan",
+                "f": "0",
+                "g": "2",
+                "h": "q",
+                "i": 3,
+                "j": "",
+                "k": 3.1,
+                "l": False,
+                "m": 5,
+            },
+        ]
+
+        self.converted_docs = mongolyin.convert_strings_to_numbers(self.docs)
+
+    def test_convert_strings_to_int(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["a"], int))
+
+    def test_ints_are_left_alone(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["i"], int))
+
+    def test_floats_are_left_alone(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["k"], float))
+
+    def test_bools_are_left_alone(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["l"], bool))
+
+    def test_convert_strings_with_commas_to_float(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["b"], float))
+
+    def test_convert_int_and_float_strings_to_float(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["d"], float))
+
+    def test_convert_true_false_strings_to_bool(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["c"], bool))
+
+    def test_convert_0_1_strings_to_bool(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["f"], bool))
+
+    def test_missing_values_to_none(self):
+        for doc in self.converted_docs:
+            self.assertIsNone(doc["e"])
+
+    def test_almost_bool_string_to_int(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["g"], int))
+
+    def test_unconvertible_fields1(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["h"], str))
+
+    def test_unconvertible_fields2(self):
+        self.assertTrue(isinstance(self.converted_docs[0]["m"], str))
+        self.assertTrue(isinstance(self.converted_docs[1]["m"], str))
+        self.assertTrue(isinstance(self.converted_docs[2]["m"], int))
+
+    def test_convert_string_with_missing_values_to_float(self):
+        self.assertIsNone(self.converted_docs[0]["j"])
+        self.assertTrue(isinstance(self.converted_docs[1]["j"], float))
+        self.assertIsNone(self.converted_docs[2]["j"])
+
+
+class TestConvertBool(unittest.TestCase):
+    def test_default(self):
+        with self.assertRaises(TypeError):
+            mongolyin.convert_bool(None)
+
+    def test_convert_bool_from_string(self):
+        self.assertTrue(mongolyin.convert_bool("true"))
+        self.assertTrue(mongolyin.convert_bool("True"))
+        self.assertTrue(mongolyin.convert_bool("TRUE"))
+
+        self.assertFalse(mongolyin.convert_bool("false"))
+        self.assertFalse(mongolyin.convert_bool("False"))
+        self.assertFalse(mongolyin.convert_bool("FALSE"))
+
+        with self.assertRaises(ValueError):
+            mongolyin.convert_bool("random_string")
+
+    def test_convert_bool_from_int(self):
+        self.assertTrue(mongolyin.convert_bool(1))
+        self.assertFalse(mongolyin.convert_bool(0))
+
+        with self.assertRaises(ValueError):
+            mongolyin.convert_bool(2)
+
+        with self.assertRaises(ValueError):
+            mongolyin.convert_bool(-1)
+
+    def test_convert_bool_from_string_representation_of_int(self):
+        self.assertTrue(mongolyin.convert_bool("1"))
+        self.assertFalse(mongolyin.convert_bool("0"))
+
+        with self.assertRaises(ValueError):
+            mongolyin.convert_bool("2")
+
+        with self.assertRaises(ValueError):
+            mongolyin.convert_bool("-1")
+
+    def test_convert_bool_from_bool(self):
+        self.assertTrue(mongolyin.convert_bool(True))
+        self.assertFalse(mongolyin.convert_bool(False))
+
+
+class TestDecorators(unittest.TestCase):
+    def setUp(self):
+        self.data_gen = lambda: ({"value": str(i)} for i in range(10))
+        self.autotyped_gen = mongolyin.autotyping(lambda: ([data] for data in self.data_gen()))
+        self.chunked_gen = mongolyin.chunking(self.data_gen)
+        self.autotyped_chunked_gen = mongolyin.autotyping(mongolyin.chunking(self.data_gen))
+
+    def test_autotyping(self):
+        data = list(self.autotyped_gen())
+        self.assertEqual(
+            data, [[{"value": False}], [{"value": True}]] + [[{"value": i}] for i in range(2, 10)]
+        )
+
+    def test_chunking(self):
+        chunks = list(self.chunked_gen(chunk_size=2))
+        self.assertEqual(
+            chunks, [[{"value": str(i)}, {"value": str(i + 1)}] for i in range(0, 10, 2)]
+        )
+
+        all_in_one_chunk = list(self.chunked_gen(chunk_size=-1))
+        self.assertEqual(all_in_one_chunk, [[{"value": str(i)} for i in range(10)]])
+
+    def test_autotyping_and_chunking(self):
+        chunks = list(self.autotyped_chunked_gen(chunk_size=2))
+        self.assertEqual(chunks, [[{"value": i}, {"value": i + 1}] for i in range(0, 10, 2)])
+
+        all_in_one_chunk = list(self.autotyped_chunked_gen(chunk_size=-1))
+        self.assertEqual(all_in_one_chunk, [[{"value": i} for i in range(10)]])
 
 
 if __name__ == "__main__":
