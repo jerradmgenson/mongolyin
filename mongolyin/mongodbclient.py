@@ -21,54 +21,26 @@ import gridfs
 import pandas as pd
 import pymongo
 
-MISSING_VALUES = {"", "none", "nan", "na", "n/a", "null", "missing"}
+MISSING_VALUES = {
+    "",
+    "-nan",
+    "nan",
+    "n/a",
+    "null",
+    "1.#ind",
+    "#n/a n/a",
+    "-1.#qnan",
+    "#n/a",
+    "1.#qnan",
+    "-1.#ind",
+    "#na",
+    "na",
+    "none",
+    "missing",
+}
 
 
-@singledispatch
-def convert_strings_to_numbers(data):
-    """
-    Converts string columns to numeric where possible in tabular data.
-
-    """
-
-    raise TypeError(f"convert_strings_to_numbers does not take arguments of type '{type(data)}'")
-
-
-@convert_strings_to_numbers.register
-def convert_dataframe_strings_to_numbers(df: pd.DataFrame):
-    """
-    Converts string columns to numeric where possible in a DataFrame.
-
-    This function iterates over each column in a DataFrame. If the column
-    type is 'object' (Pandas' internal type for string), it tries to convert
-    the column to a numeric type. If any value in the column cannot be
-    converted to a numeric type, the function leaves the column as strings.
-    In addition, it replaces commas with periods before attempting the
-    conversion.
-
-    Args:
-        df (pd.DataFrame): The DataFrame whose string columns are to be
-                           converted to numeric where possible.
-
-    Returns:
-        pd.DataFrame: The DataFrame with string columns converted to numeric
-                      where possible.
-
-    """
-
-    for col in df.columns:
-        if df[col].dtype == "object":  # if the column is a string
-            try:
-                # Replace commas with periods and attempt conversion to numeric
-                df[col] = pd.to_numeric(df[col].str.replace(",", "."), errors="raise")
-
-            except ValueError:
-                pass  # If any value raises a ValueError when converting, leave the column as strings
-    return df
-
-
-@convert_strings_to_numbers.register(list)
-def convert_dict_strings_to_numbers(docs: List[dict]):
+def convert_strings_to_numbers(docs: List[dict]):
     """
     Convert columns of string values in a list of dictionaries to numbers if possible.
 
@@ -85,46 +57,54 @@ def convert_dict_strings_to_numbers(docs: List[dict]):
 
     # Identify columns that we can convert to numeric values.
     # Initialize all column names with None conversion function.
-    convert_columns = {c: None for c in docs[0]}
+    convert_columns = {c: 0 for c in docs[0]}
+
+    # Define the conversions in the order they should be attempted.
+    conversions = [convert_bool, int, float]
 
     for doc in docs:
-        # For each column, decide if it should be converted or not.
-        for col, convert in convert_columns.copy().items():
-            # Ignore None values.
-            if doc[col] is None:
+        for col in convert_columns.copy():
+            val = doc[col]
+            if val is None or col not in convert_columns:
                 continue
 
             # Delete non-string columns from convert_columns.
-            if not isinstance(doc[col], str):
+            if not isinstance(val, str):
                 del convert_columns[col]
                 continue
 
-            # Ignore missing values.
-            if doc[col].lower().strip() in MISSING_VALUES:
+            val = val.strip().lower().replace(",", ".")
+
+            # Convert missing values to None.
+            if val in MISSING_VALUES:
+                doc[col] = None
                 continue
 
-            # Try to convert the string to int, then float.
-            # If conversion to both int and float fails, remove the column from
-            # convert_columns.
-            try:
-                new_val = doc[col].replace(",", ".")
-                if convert is None or convert == int:
-                    int(new_val)
-                    convert_columns[col] = int
+            success = False
+            for i, conversion in enumerate(conversions):
+                if i < convert_columns[col]:
+                    continue
 
-                else:
-                    float(new_val)
-
-            except ValueError:
                 try:
-                    float(new_val)
-                    convert_columns[col] = float
+                    # Try to convert the value. If successful, set the conversion for this column.
+                    conversion(val)
+                    convert_columns[col] = i
+                    success = True
+                    # Break the inner loop as soon as a successful conversion is found.
+                    break
 
                 except ValueError:
-                    del convert_columns[col]
+                    continue
 
-            except AttributeError:
+                except TypeError:
+                    continue
+
+            if not success:
+                # If no successful conversion was found, remove the column.
                 del convert_columns[col]
+
+    # Convert function ids to functions.
+    convert_columns = {c: conversions[i] for c, i in convert_columns.items()}
 
     # At this point, convert_columns contains only the columns that can be
     # converted to int or float.
@@ -132,16 +112,107 @@ def convert_dict_strings_to_numbers(docs: List[dict]):
     # conversion function determined in the previous step.
     for doc in docs:
         for col, convert in convert_columns.items():
-            # Convert missing values to None.
-            if doc[col].lower().strip() in MISSING_VALUES:
-                doc[col] = None
-
-            # If the value is not a missing value, convert it to the appropriate
-            # numeric type.
-            elif doc[col] is not None:
+            if doc[col] is not None:
                 doc[col] = convert(doc[col].replace(",", "."))
 
     return docs
+
+
+@singledispatch
+def convert_bool(val):
+    """
+    Converts a value to a boolean.
+
+    This function is a dispatcher and its functionality depends on the type of `val`.
+    By default, it raises a TypeError. The actual implementations are provided by
+    the registered implementations for specific types.
+
+    Args:
+        val: The value to be converted to a boolean.
+
+    Raises:
+        TypeError: If no implementation for the type of `val` exists.
+
+    """
+
+    raise TypeError(f"type '{type(val)}' can't be converted to type 'bool'")
+
+
+@convert_bool.register
+def convert_bool_from_bool(boolean: bool):
+    """
+    Converts a boolean to a boolean (i.e., a no-op).
+
+    This function is useful in the single dispatch setup, where we need to have
+    a specific function for each type that we expect to handle.
+
+    Args:
+        boolean (bool): The boolean to be converted to a boolean.
+
+    Returns:
+        bool: The same boolean value.
+
+    """
+    return boolean
+
+
+@convert_bool.register
+def convert_bool_from_string(string: str):
+    """
+    Converts a string to a boolean.
+
+    If the string is 'true' (case-insensitive), it returns True.
+    If the string is 'false' (case-insensitive), it returns False.
+    If the string represents an integer, it converts the string to an integer and
+    tries to convert that integer to a boolean.
+
+    Args:
+        string (str): The string to be converted to a boolean.
+
+    Returns:
+        bool: The converted boolean value.
+
+    Raises:
+        ValueError: If the string cannot be converted to a boolean.
+
+    """
+
+    string = string.strip().lower()
+    if string == "true":
+        return True
+
+    if string == "false":
+        return False
+
+    return convert_bool(int(string))
+
+
+@convert_bool.register
+def convert_bool_from_int(integer: int):
+    """
+    Converts an integer to a boolean.
+
+    If the integer is 1, it returns True.
+    If the integer is 0, it returns False.
+
+    Args:
+        integer (int): The integer to be converted to a boolean.
+
+    Returns:
+        bool: The converted boolean value.
+
+    Raises:
+        ValueError: If the integer is not 0 or 1.
+
+    """
+
+    if integer == 1:
+        return True
+
+    if integer == 0:
+        return False
+
+    raise ValueError(f"Can not convert '{integer}' to type 'bool'")
 
 
 def disconnect_on_error(func):

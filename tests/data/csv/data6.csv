@@ -1,4 +1,4 @@
-Name;Age;Weight
-Alice;25;55.5
-Bob;32;85.7
-Charlie;37;68.2
+Name;Age;Weight;Female
+Alice;25;55.5;true
+Bob;32;85.7;false
+Charlie;37;68.2;false
