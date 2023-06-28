@@ -422,7 +422,7 @@ def select_etl_functions(filepath, mongo_client, chunk_size):
             load = partial(mongo_client.insert_document, filename=filepath.name)
 
         else:
-            extract = partial(extract_json_chunks, chunk_size)
+            extract = partial(extract_json_chunks, chunk_size=chunk_size)
             load = partial(mongo_client.insert_generator, filename=filepath.name)
 
     else:
