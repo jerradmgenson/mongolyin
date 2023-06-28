@@ -21,6 +21,8 @@ import gridfs
 import pandas as pd
 import pymongo
 
+MISSING_VALUES = {"", "none", "nan", "na", "n/a", "null", "missing"}
+
 
 @singledispatch
 def convert_strings_to_numbers(data):
@@ -81,9 +83,29 @@ def convert_dict_strings_to_numbers(docs: List[dict]):
 
     """
 
-    convert_columns = {k: None for k, v in docs[0].items() if isinstance(v, str)}
+    # Identify columns that we can convert to numeric values.
+    # Initialize all column names with None conversion function.
+    convert_columns = {c: None for c in docs[0]}
+
     for doc in docs:
+        # For each column, decide if it should be converted or not.
         for col, convert in convert_columns.copy().items():
+            # Ignore None values.
+            if doc[col] is None:
+                continue
+
+            # Delete non-string columns from convert_columns.
+            if not isinstance(doc[col], str):
+                del convert_columns[col]
+                continue
+
+            # Ignore missing values.
+            if doc[col].lower().strip() in MISSING_VALUES:
+                continue
+
+            # Try to convert the string to int, then float.
+            # If conversion to both int and float fails, remove the column from
+            # convert_columns.
             try:
                 new_val = doc[col].replace(",", ".")
                 if convert is None or convert == int:
@@ -104,9 +126,20 @@ def convert_dict_strings_to_numbers(docs: List[dict]):
             except AttributeError:
                 del convert_columns[col]
 
+    # At this point, convert_columns contains only the columns that can be
+    # converted to int or float.
+    # Now, actually convert the string columns to numeric columns based on the
+    # conversion function determined in the previous step.
     for doc in docs:
         for col, convert in convert_columns.items():
-            doc[col] = convert(doc[col].replace(",", "."))
+            # Convert missing values to None.
+            if doc[col].lower().strip() in MISSING_VALUES:
+                doc[col] = None
+
+            # If the value is not a missing value, convert it to the appropriate
+            # numeric type.
+            elif doc[col] is not None:
+                doc[col] = convert(doc[col].replace(",", "."))
 
     return docs
 
