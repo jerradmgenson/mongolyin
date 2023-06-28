@@ -503,8 +503,15 @@ def extract_pandas(filepath):
         raise ValueError(f"This extractor can not read '{filepath.suffix} files.'")
 
     df = convert_strings_to_numbers(df)
+    records = df.to_dict(orient="records")
 
-    return df.to_dict(orient="records")
+    # Convert np.nan values to None
+    for record in records:
+        for key, value in record.items():
+            if pd.isnull(value):
+                record[key] = None
+
+    return records
 
 
 def extract_json(filepath):
