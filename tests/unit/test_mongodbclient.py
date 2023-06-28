@@ -13,9 +13,12 @@ import datetime
 import unittest
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import pandas as pd
 import pymongo
 
-from mongolyin.mongodbclient import MongoDBClient
+from mongolyin.mongodbclient import (MongoDBClient, convert_bool,
+                                     convert_strings_to_numbers)
 
 
 class TestMongoDBClient(unittest.TestCase):
@@ -286,6 +289,159 @@ class TestMongoDBClient(unittest.TestCase):
         self.client._collection_name = ""
         new_client = self.client.with_collection("new_collection")
         self.assertEqual(new_client._collection_name, "new_collection")
+
+
+class TestConvertBool(unittest.TestCase):
+    def test_default(self):
+        with self.assertRaises(TypeError):
+            convert_bool(None)
+
+    def test_convert_bool_from_string(self):
+        self.assertTrue(convert_bool("true"))
+        self.assertTrue(convert_bool("True"))
+        self.assertTrue(convert_bool("TRUE"))
+
+        self.assertFalse(convert_bool("false"))
+        self.assertFalse(convert_bool("False"))
+        self.assertFalse(convert_bool("FALSE"))
+
+        with self.assertRaises(ValueError):
+            convert_bool("random_string")
+
+    def test_convert_bool_from_int(self):
+        self.assertTrue(convert_bool(1))
+        self.assertFalse(convert_bool(0))
+
+        with self.assertRaises(ValueError):
+            convert_bool(2)
+
+        with self.assertRaises(ValueError):
+            convert_bool(-1)
+
+    def test_convert_bool_from_string_representation_of_int(self):
+        self.assertTrue(convert_bool("1"))
+        self.assertFalse(convert_bool("0"))
+
+        with self.assertRaises(ValueError):
+            convert_bool("2")
+
+        with self.assertRaises(ValueError):
+            convert_bool("-1")
+
+    def test_convert_bool_from_bool(self):
+        self.assertTrue(convert_bool(True))
+        self.assertFalse(convert_bool(False))
+
+
+class TestConvertStringsToNumbers(unittest.TestCase):
+    """
+    Unit tests for mongodbclient.convert_strings_to_numbers
+
+    """
+
+    def setUp(self):
+        self.docs = [
+            {
+                "a": "1",
+                "b": "1,1",
+                "c": "true",
+                "d": "1",
+                "e": "",
+                "f": "0",
+                "g": "0",
+                "h": "1",
+                "i": 1,
+                "j": None,
+                "k": 1.0,
+                "l": True,
+                "m": "true",
+            },
+            {
+                "a": "2",
+                "b": "2,2",
+                "c": "false",
+                "d": "2",
+                "e": "NAN",
+                "f": "1",
+                "g": "1",
+                "h": "2",
+                "i": 2,
+                "j": "3.1",
+                "k": 2.0,
+                "l": True,
+                "m": "false",
+            },
+            {
+                "a": "3",
+                "b": "3,3",
+                "c": "true",
+                "d": "3.3",
+                "e": "nan",
+                "f": "0",
+                "g": "2",
+                "h": "q",
+                "i": 3,
+                "j": "",
+                "k": 3.1,
+                "l": False,
+                "m": 5,
+            },
+        ]
+        self.converted_docs = convert_strings_to_numbers(self.docs)
+
+    def test_convert_strings_to_int(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["a"], int))
+
+    def test_ints_are_left_alone(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["i"], int))
+
+    def test_floats_are_left_alone(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["k"], float))
+
+    def test_bools_are_left_alone(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["l"], bool))
+
+    def test_convert_strings_with_commas_to_float(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["b"], float))
+
+    def test_convert_int_and_float_strings_to_float(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["d"], float))
+
+    def test_convert_true_false_strings_to_bool(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["c"], bool))
+
+    def test_convert_0_1_strings_to_bool(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["f"], bool))
+
+    def test_missing_values_to_none(self):
+        for doc in self.converted_docs:
+            self.assertIsNone(doc["e"])
+
+    def test_almost_bool_string_to_int(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["g"], int))
+
+    def test_unconvertible_fields1(self):
+        for doc in self.converted_docs:
+            self.assertTrue(isinstance(doc["h"], str))
+
+    def test_unconvertible_fields2(self):
+        self.assertTrue(isinstance(self.converted_docs[0]["m"], str))
+        self.assertTrue(isinstance(self.converted_docs[1]["m"], str))
+        self.assertTrue(isinstance(self.converted_docs[2]["m"], int))
+
+    def test_convert_string_with_missing_values_to_float(self):
+        self.assertIsNone(self.converted_docs[0]["j"])
+        self.assertTrue(isinstance(self.converted_docs[1]["j"], float))
+        self.assertIsNone(self.converted_docs[2]["j"])
 
 
 if __name__ == "__main__":
