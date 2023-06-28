@@ -17,8 +17,11 @@ import numpy as np
 import pandas as pd
 import pymongo
 
-from mongolyin.mongodbclient import (MongoDBClient, convert_bool,
-                                     convert_strings_to_numbers)
+from mongolyin.mongodbclient import (
+    MongoDBClient,
+    convert_bool,
+    convert_strings_to_numbers,
+)
 
 
 class TestMongoDBClient(unittest.TestCase):
