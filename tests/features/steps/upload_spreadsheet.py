@@ -109,7 +109,8 @@ def step_impl(context):
                 {"ID": 1, "Name": 1, "Quantity": 1, "Price": 1, "_id": 0},
             )
         )
-        assert len(results) == 4
+
+        assert len(results) == 5
         test_data = {tuple(t.items()) for t in context.test_data}
         results = {tuple(r.items()) for r in results}
         assert results > test_data
