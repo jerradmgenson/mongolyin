@@ -271,7 +271,13 @@ class MongoDBClient:
 
         # Prepare documents with metadata and check against existing hashes
         for document in documents:
-            sorted_items = str(sorted(list(document.items())))
+            try:
+                sorted_items = str(sorted(list(document.items())))
+
+            except TypeError as te:
+                logger.warning(str(te))
+                sorted_items = str(list(document.items()))
+
             if sorted_items in existing_documents:
                 logger.debug("Document already exists in database, skipping")
                 continue
