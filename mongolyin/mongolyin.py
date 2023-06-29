@@ -53,6 +53,7 @@ import clevercsv
 import ijson
 import pandas as pd
 import psutil
+import pymongo
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -83,6 +84,12 @@ MISSING_VALUES = {
 RESTART_SIZE = 157286400  # 150 MB
 SPREADSHEET_EXTENSIONS = ".xls", ".xlsx", ".ods"
 PANDAS_EXTENSIONS = SPREADSHEET_EXTENSIONS + (".parquet",)
+PYMONGO_RETRY_EXCEPTIONS = (
+    pymongo.errors.AutoReconnect,
+    pymongo.errors.ConnectionFailure,
+    pymongo.errors.NetworkTimeout,
+    pymongo.errors.ServerSelectionTimeoutError,
+)
 
 
 def main(argv):
@@ -378,7 +385,12 @@ def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
 
         except etl.ETLException as etle:
             if etle.stage_name == "load":
-                debounce_queue.push(filepath)
+                for exception_type in PYMONGO_RETRY_EXCEPTIONS:
+                    if isinstance(etle.original_exception, exception_type):
+                        logger.info("Will rerun failed pipeline.")
+                        debounce_queue.push(filepath)
+                        time.sleep(DEFAULT_SLEEP_TIME)
+                        break
 
         finally:
             del pipeline
