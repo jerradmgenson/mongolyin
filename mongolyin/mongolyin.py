@@ -62,6 +62,7 @@ from mongolyin.mongodbclient import MongoDBClient
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_COLLECTION_NAME = "misc"
+DEFAULT_SLEEP_TIME = 2
 MISSING_VALUES = {
     "",
     "-nan",
@@ -200,7 +201,7 @@ def parse_command_line(argv):
 
     parser.add_argument(
         "--sleep-time",
-        default=2,
+        default=DEFAULT_SLEEP_TIME,
         type=float,
         help="Time (in seconds) to sleep in-between checking for file changes.",
     )
@@ -383,6 +384,7 @@ def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
                 or "clevercsv" in str(etle.original_exception)
             ):
                 debounce_queue.push(filepath)
+                time.sleep(DEFAULT_SLEEP_TIME)
 
         finally:
             del pipeline
