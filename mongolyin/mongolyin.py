@@ -35,7 +35,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 """
 
-
 import argparse
 import gc
 import json
@@ -45,9 +44,10 @@ import sys
 import time
 from collections import deque
 from functools import partial, singledispatch, wraps
+from itertools import chain
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Dict, List
+from typing import List
 
 import clevercsv
 import ijson
@@ -380,8 +380,6 @@ def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
             if etle.stage_name in ("file ready check", "load"):
                 debounce_queue.push(filepath)
 
-            return False
-
         finally:
             del pipeline
             gc.collect()
@@ -568,14 +566,14 @@ def convert_strings_to_numbers(docs: List[dict]):
 
     # Identify columns that we can convert to numeric values.
     # Initialize all column names with None conversion function.
-    convert_columns = {c: 0 for c in docs[0]}
+    convert_columns = {c: 0 for c in chain(*docs)}
 
     # Define the conversions in the order they should be attempted.
     conversions = [convert_bool, int, float]
 
     for doc in docs:
         for col in convert_columns.copy():
-            val = doc[col]
+            val = doc.get(col)
             if val is None or col not in convert_columns:
                 continue
 
@@ -623,7 +621,7 @@ def convert_strings_to_numbers(docs: List[dict]):
     # conversion function determined in the previous step.
     for doc in docs:
         for col, convert in convert_columns.items():
-            if doc[col] is not None:
+            if doc.get(col) is not None:
                 doc[col] = convert(doc[col].replace(",", "."))
 
     return docs
@@ -812,7 +810,7 @@ def extract_json_chunks(filepath):
     """
 
     with filepath.open() as fp:
-        objects = ijson.items(fp, "item")
+        objects = ijson.items(fp, "item", use_float=True)
         for row in objects:
             yield row
 
