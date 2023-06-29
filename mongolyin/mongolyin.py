@@ -377,7 +377,7 @@ def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
             pipeline.run(filepath)
 
         except etl.ETLException as etle:
-            if etle.stage_name in ("file ready check", "load"):
+            if etle.stage_name == "load":
                 debounce_queue.push(filepath)
 
         finally:
