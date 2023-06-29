@@ -30,7 +30,7 @@ def step_impl(context):
     collection_dir.mkdir(parents=True)
     corrupt_file = collection_dir / "corrupt.json"
     context.corrupt_file = corrupt_file
-    data = "{'val': 123}"
+    data = context.text.strip()
     with corrupt_file.open("w") as fp:
         fp.write(data)
 
@@ -100,10 +100,16 @@ def step_impl(context):
 @then("it should log the error and continue without crashing")
 def step_impl(context):
     error_text = context.text.strip()
+    context.error_text = error_text
     assert error_text in context.mongolyin_logs
     logs = context.mongolyin_logs.split("\n")
     logs = [l for l in logs if l.strip()]
     assert "Checking for new events..." in logs[-1]
+
+
+@then("not rerun the pipeline")
+def step_impl(context):
+    assert context.mongolyin_logs.count(context.error_text) == 1
 
 
 @then("it should log the error")

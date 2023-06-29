@@ -11,7 +11,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import os
 from copy import deepcopy
-from hashlib import sha256
 from pathlib import Path
 
 import pandas as pd
@@ -19,7 +18,7 @@ import pymongo
 from behave import *
 
 
-@given("we have existing csv data in the database")
+@given("we have existing spreadsheet data in the database")
 def step_impl(context):
     kwargs = dict(
         host=context.mongo_address,
@@ -30,7 +29,7 @@ def step_impl(context):
     with pymongo.MongoClient(**kwargs) as client:
         db = client["db"]
         collection = db["collection"]
-        context.filename = "data1.csv"
+        context.filename = context.text.strip()
         test_data = [
             {"ID": 1, "Name": "Apple", "Quantity": 10, "Price": 0.5},
             {"ID": 2, "Name": "Orange", "Quantity": 15, "Price": 0.4},
@@ -39,10 +38,7 @@ def step_impl(context):
         context.test_data = test_data
         test_data = deepcopy(test_data)
         for doc in test_data:
-            metadata = dict(
-                hash=sha256(str(doc).encode()).hexdigest(),
-                filename=context.filename,
-            )
+            metadata = dict(filename=context.filename)
             doc["metadata"] = metadata
 
         collection.insert_many(test_data)
@@ -73,6 +69,9 @@ def step_impl(context):
                     else:
                         df = pd.read_csv(filepath)
 
+                elif filepath.suffix == ".parquet":
+                    df = pd.read_parquet(filepath)
+
                 else:
                     df = pd.read_excel(filepath)
 
@@ -92,7 +91,7 @@ def step_impl(context):
                     assert len(list(collection.find(record))) == 1
 
 
-@then("it should upload csv data for the modified file")
+@then("it should upload spreadsheet data for the modified file")
 def step_impl(context):
     kwargs = dict(
         host=context.mongo_address,
@@ -105,12 +104,12 @@ def step_impl(context):
         collection = db[context.mongo_collection]
         results = list(
             collection.find(
-                {"metadata.filename": "data1.csv"},
+                {"metadata.filename": context.filename},
                 {"ID": 1, "Name": 1, "Quantity": 1, "Price": 1, "_id": 0},
             )
         )
 
-        assert len(results) == 5
+        assert len(results) == int(context.text)
         test_data = {tuple(t.items()) for t in context.test_data}
         results = {tuple(r.items()) for r in results}
         assert results > test_data
