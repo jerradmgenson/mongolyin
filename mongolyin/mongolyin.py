@@ -377,7 +377,11 @@ def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
             pipeline.run(filepath)
 
         except etl.ETLException as etle:
-            if etle.stage_name == "load":
+            if etle.stage_name == "load" and not (
+                isinstance(etle.original_exception, ijson.common.JSONError)
+                or isinstance(etle.original_exception, UnicodeDecodeError)
+                or "clevercsv" in str(etle.original_exception)
+            ):
                 debounce_queue.push(filepath)
 
         finally:
