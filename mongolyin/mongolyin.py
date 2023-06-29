@@ -63,6 +63,7 @@ from mongolyin.mongodbclient import MongoDBClient
 DEFAULT_ADDRESS = "mongodb://localhost:27017"
 DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_COLLECTION_NAME = "misc"
+DEFAULT_SLEEP_TIME = 2
 MISSING_VALUES = {
     "",
     "-nan",
@@ -207,7 +208,7 @@ def parse_command_line(argv):
 
     parser.add_argument(
         "--sleep-time",
-        default=2,
+        default=DEFAULT_SLEEP_TIME,
         type=float,
         help="Time (in seconds) to sleep in-between checking for file changes.",
     )
@@ -305,6 +306,7 @@ def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
 
     event_queue = Queue()
     debounce_queue = SetQueue()
+    logger = logging.getLogger(__name__)
 
     def process():
         """
@@ -370,7 +372,6 @@ def create_dispatch(mongo_client, ingress_path, chunk_size, debounce_time=0.1):
             extract, load = select_etl_functions(filepath, new_client, chunk_size)
 
         except Exception as e:
-            logger = logging.getLogger(__name__)
             logger.exception(e)
             return True
 
