@@ -207,7 +207,7 @@ def step_impl(context):
                 collection_dir.mkdir(parents=True)
                 filepath = collection_dir / "data.json"
                 context.filename = filepath.name
-                data = [{"val": 1}, {"val": 2}]
+                data = [{"val": 1, "sal": 1.1}, {"val": 2, "sal": 2.2}]
                 with filepath.open("w") as fp:
                     json.dump(data, fp)
 

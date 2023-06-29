@@ -347,6 +347,18 @@ class TestConvertStringsToNumbers(unittest.TestCase):
         self.assertTrue(isinstance(self.converted_docs[1]["j"], float))
         self.assertIsNone(self.converted_docs[2]["j"])
 
+    def test_sparse_dataset(self):
+        data = [
+            {"a": "1", "b": "true", "c": "3.1"},
+            {"a": "2", "b": "false", "d": "0"},
+            {"a": "3", "c": "1.4", "d": "1"},
+        ]
+
+        converted_data = mongolyin.convert_strings_to_numbers(data)
+        self.assertEqual(converted_data[0], {"a": 1, "b": True, "c": 3.1})
+        self.assertEqual(converted_data[1], {"a": 2, "b": False, "d": False})
+        self.assertEqual(converted_data[2], {"a": 3, "c": 1.4, "d": True})
+
 
 class TestConvertBool(unittest.TestCase):
     def test_default(self):
